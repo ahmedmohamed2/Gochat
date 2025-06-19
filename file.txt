@@ -1,73 +1,19 @@
-1. Fix Ticket Ownership
-The nginx ticket is owned by root instead of nginx user:
+Set Up Automatic Renewal
+To prevent this from happening again:
 
-# Fix ownership
-sudo chown nginx:nginx /tmp/krb5cc_nginx
-sudo chmod 600 /tmp/krb5cc_nginx
+# Add cron job for automatic sync
+(crontab -l 2>/dev/null; echo "*/10 * * * * /usr/local/bin/sync-nginx-krb5.sh") | sudo crontab -
 
-# Test access
+# Verify cron job is set
+sudo crontab -l
+
+**********************************
+
+Monitor the Setup
+You can monitor the sync with:
+
+# Watch the sync log
+tail -f /var/log/krb5-nginx-sync.log
+
+# Check ticket status anytime
 sudo -u nginx klist -c /tmp/krb5cc_nginx
-
-*****************************************************
-
-2. Get SQL Server Service Ticket
-Your ticket doesn't have the SQL Server service ticket yet. Let's get it:
-
-****************************************************
-
-# Get SQL Server service ticket by connecting to the database
-sqlcmd -S as2480dxbdb05.etisalat.corp.ae -E -Q "SELECT @@VERSION"
-
-# Or if sqlcmd isn't available, try this:
-echo "exit" | /opt/mssql-tools/bin/sqlcmd -S as2480dxbdb05.etisalat.corp.ae -E
-
-# Check if SQL Server ticket is now present
-klist | grep -i mssql
-
-****************************************************
-
-3. Recreate the Sync Script
-The sync script is missing. Let's recreate it:
-sudo cat > /usr/local/bin/sync-nginx-krb5.sh << 'EOF'
-#!/bin/bash
-
-NGINX_TICKET="/tmp/krb5cc_nginx"
-ROOT_TICKET="/tmp/krb5cc_0"
-LOG_FILE="/var/log/krb5-nginx-sync.log"
-
-# Copy root ticket to nginx location
-if [ -f "$ROOT_TICKET" ]; then
-    cp "$ROOT_TICKET" "$NGINX_TICKET"
-    chown nginx:nginx "$NGINX_TICKET"
-    chmod 600 "$NGINX_TICKET"
-    echo "$(date): Kerberos ticket synced successfully" | tee -a "$LOG_FILE"
-else
-    echo "$(date): ERROR - Root ticket not found" | tee -a "$LOG_FILE"
-fi
-EOF
-
-sudo chmod +x /usr/local/bin/sync-nginx-krb5.sh
-
-# Run it
-sudo /usr/local/bin/sync-nginx-krb5.sh
-
-****************************************************
-4. Complete Fix Process
-
-# Step 1: Get fresh ticket with SQL Server service
-kinit abdelfabdelaziz@ETISALAT.CORP.AE
-# Enter password
-
-# Step 2: Get SQL Server service ticket
-echo "SELECT @@VERSION" | /opt/mssql-tools/bin/sqlcmd -S as2480dxbdb05.etisalat.corp.ae -E
-
-# Step 3: Verify you have SQL Server ticket
-klist | grep -i mssql
-
-# Step 4: Sync to nginx
-sudo /usr/local/bin/sync-nginx-krb5.sh
-
-# Step 5: Verify nginx can access it
-sudo -u nginx klist -c /tmp/krb5cc_nginx
-
-
