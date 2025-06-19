@@ -1,19 +1,32 @@
-[root@DX00133 ~]# klist
-Ticket cache: FILE:/tmp/krb5cc_0
+[root@DX00133 ~]# sudo chown nginx:nginx /tmp/krb5cc_nginx
+[root@DX00133 ~]# sudo chmod 600 /tmp/krb5cc_nginx
+[root@DX00133 ~]# sudo -u nginx klist -c /tmp/krb5cc_nginx
+Ticket cache: FILE:/tmp/krb5cc_nginx
 Default principal: abdelfabdelaziz@ETISALAT.CORP.AE
 
 Valid starting       Expires              Service principal
-06/19/2025 18:00:01  06/20/2025 04:00:01  krbtgt/ETISALAT.CORP.AE@ETISALAT.CORP.AE
-        renew until 06/26/2025 18:00:01
-[root@DX00133 ~]# ls -la /tmp/krb5cc_nginx
--rw------- 1 root root 1892 Jun 19 17:38 /tmp/krb5cc_nginx
-[root@DX00133 ~]# sudo -u nginx klist -c /tmp/krb5cc_nginx
-klist: Credentials cache permissions incorrect (filename: /tmp/krb5cc_nginx)
-[root@DX00133 ~]# kinit abdelfabdelaziz@ETISALAT.CORP.AE
-Password for abdelfabdelaziz@ETISALAT.CORP.AE:
-[root@DX00133 ~]# klist | grep -i mssql0
+06/19/2025 17:38:35  06/20/2025 03:38:35  krbtgt/ETISALAT.CORP.AE@ETISALAT.CORP.AE
+        renew until 06/26/2025 17:38:24
+06/19/2025 18:25:18  06/20/2025 03:38:35  MSSQLSvc/as2480dxbdb05.etisalat.corp.ae:1433@ETISALAT.CORP.AE
+        renew until 06/26/2025 17:38:24
+[root@DX00133 ~]# sudo cat > /usr/local/bin/sync-nginx-krb5.sh << 'EOF'
+#!/bin/bash
+
+NGINX_TICKET="/tmp/krb5cc_nginx"
+ROOT_TICKET="/tmp/krb5cc_0"
+LOG_FILE="/var/log/krb5-nginx-sync.log"
+
+# Copy root ticket to nginx location
+if [ -f "$ROOT_TICKET" ]; then
+    cp "$ROOT_TICKET" "$NGINX_TICKET"
+    chown nginx:nginx "$NGINX_TICKET"
+    chmod 600 "$NGINX_TICKET"
+    echo "$(date): Kerberos ticket synced successfully" | tee -a "$LOG_FILE"
+else
+    echo "$(date): ERROR - Root ticket not found" | tee -a "$LOG_FILE"
+fi
+EOF
+[root@DX00133 ~]# sudo chmod +x /usr/local/bin/sync-nginx-krb5.sh
 [root@DX00133 ~]# sudo /usr/local/bin/sync-nginx-krb5.sh
-Command not found
-[root@DX00133 ~]# sudo -u nginx klist -c /tmp/krb5cc_nginx
-klist: Credentials cache permissions incorrect (filename: /tmp/krb5cc_nginx)
+Thu Jun 19 06:26:16 PM +04 2025: Kerberos ticket synced successfully
 [root@DX00133 ~]#
