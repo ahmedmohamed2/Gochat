@@ -1,7 +1,12 @@
+[root@DX00133 ~]# sudo crontab -l
+0 * * * * /opt/OV/nonOV/perl/a/bin/perl /opt/perf/bin/watchhpcs.pl
+0 */2 * * * /root/kinit_script.sh
+*/10 * * * * /usr/local/bin/sync-nginx-krb5.sh
+[root@DX00133 ~]# (echo "0 * * * * /opt/OV/nonOV/perl/a/bin/perl /opt/perf/bin/watchhpcs.pl"; echo "0 */2 * * * /root/kinit_script.sh"; echo "*/10 * * * * /usr/local/bin/sync-nginx-krb5.sh") | sudo crontab -
+[root@DX00133 ~]# sudo crontab -l
+0 * * * * /opt/OV/nonOV/perl/a/bin/perl /opt/perf/bin/watchhpcs.pl
+0 */2 * * * /root/kinit_script.sh
+*/10 * * * * /usr/local/bin/sync-nginx-krb5.sh
+[root@DX00133 ~]#
 
 
-# Execute the command
-(echo "0 * * * * /opt/OV/nonOV/perl/a/bin/perl /opt/perf/bin/watchhpcs.pl"; echo "0 */2 * * * /root/kinit_script.sh"; echo "*/10 * * * * /usr/local/bin/sync-nginx-krb5.sh") | sudo crontab -
-
-# Verify it worked
-sudo crontab -l
