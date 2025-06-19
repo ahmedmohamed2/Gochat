@@ -1,0 +1,19 @@
+[root@DX00133 ~]# klist
+Ticket cache: FILE:/tmp/krb5cc_0
+Default principal: abdelfabdelaziz@ETISALAT.CORP.AE
+
+Valid starting       Expires              Service principal
+06/19/2025 18:00:01  06/20/2025 04:00:01  krbtgt/ETISALAT.CORP.AE@ETISALAT.CORP.AE
+        renew until 06/26/2025 18:00:01
+[root@DX00133 ~]# ls -la /tmp/krb5cc_nginx
+-rw------- 1 root root 1892 Jun 19 17:38 /tmp/krb5cc_nginx
+[root@DX00133 ~]# sudo -u nginx klist -c /tmp/krb5cc_nginx
+klist: Credentials cache permissions incorrect (filename: /tmp/krb5cc_nginx)
+[root@DX00133 ~]# kinit abdelfabdelaziz@ETISALAT.CORP.AE
+Password for abdelfabdelaziz@ETISALAT.CORP.AE:
+[root@DX00133 ~]# klist | grep -i mssql0
+[root@DX00133 ~]# sudo /usr/local/bin/sync-nginx-krb5.sh
+Command not found
+[root@DX00133 ~]# sudo -u nginx klist -c /tmp/krb5cc_nginx
+klist: Credentials cache permissions incorrect (filename: /tmp/krb5cc_nginx)
+[root@DX00133 ~]#
