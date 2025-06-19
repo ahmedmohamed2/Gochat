@@ -1,0 +1,25 @@
+1. Check Current Ticket Status
+
+# Check your root ticket
+klist
+
+# Check if nginx ticket exists and is valid
+ls -la /tmp/krb5cc_nginx
+sudo -u nginx klist -c /tmp/krb5cc_nginx
+
+2. Get Fresh Tickets
+
+# Get a fresh ticket for yourself
+kinit abdelfabdelaziz@ETISALAT.CORP.AE
+# Enter your password
+
+# Verify you have a fresh ticket with SQL Server service
+klist | grep -i mssql
+
+3. Sync to Nginx User
+
+# Run the sync script
+sudo /usr/local/bin/sync-nginx-krb5.sh
+
+# Verify the sync worked
+sudo -u nginx klist -c /tmp/krb5cc_nginx
