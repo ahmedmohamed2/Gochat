@@ -1,5 +1,28 @@
-sudo crontab -e
-
-0 * * * * /opt/OV/nonOV/perl/a/bin/perl /opt/perf/bin/watchhpcs.pl
-0 */2 * * * /root/kinit_script.sh
-*/10 * * * * /usr/local/bin/sync-nginx-krb5.sh
+import requests
+ 
+# Define the URL and headers
+url = "http://10.58.38.218:30011/v1/completions"
+headers = {
+    "Content-Type": "application/json"
+}
+ 
+# Define the payload
+payload = {
+    "model": "/mnt/data/llms/Llama-3.3-70B-Instruct",
+    "prompt": "who are you my name's is zizo",
+    "temperature": 0.0,
+    "top_p": 0.95,
+    "max_tokens": 100
+}
+ 
+# Make the POST request
+response = requests.post(url, headers=headers, json=payload, proxies={"http": None, "https": None})
+ 
+# Parse the JSON response
+if response.status_code == 200:
+    response_data = response.json()
+    # Extract and print the 'text' field
+    text = response_data["choices"][0]["text"]
+    print(text)
+else:
+    print(f"Error: Received status code {response.status_code}")
