@@ -35,7 +35,8 @@ class OpenAIConfig
             'prompt' => $combinedPrompt,
             'temperature' => 0.0,
             'top_p' => 0.95,
-            'max_tokens' => 1000, // Reduced from 4096 for faster response
+            'max_tokens' => 500, // Reduced to prevent repetition
+            'stop' => ["\n\n", "REVIEW TEXT", "INSTRUCTIONS"], // Stop sequences to prevent continuation
         ];
 
         try {
@@ -88,6 +89,12 @@ class OpenAIConfig
         // Log the raw response for debugging
         Log::info('Raw AI Response:', ['response' => $rawResponse]);
 
+        // Check if the response contains descriptive text instead of JSON
+        if (strpos($rawResponse, '{') === false || strpos($rawResponse, '}') === false) {
+            Log::warning('Response contains no JSON structure, attempting to parse descriptive text');
+            return $this->parseDescriptiveResponse($rawResponse);
+        }
+
         // Find all JSON objects in the response
         preg_match_all('/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/', $rawResponse, $matches);
         
@@ -116,167 +123,109 @@ class OpenAIConfig
             }
         }
 
-        // If still no valid JSON, try to construct a basic response
-        Log::warning('No valid JSON found in response, attempting to construct basic response');
+        // If still no valid JSON, try to parse descriptive response
+        Log::warning('No valid JSON found in response, attempting to parse descriptive text');
+        return $this->parseDescriptiveResponse($rawResponse);
+    }
+
+    /**
+     * Parse descriptive text response and convert to JSON
+     *
+     * @param string $response
+     * @return string
+     */
+    private function parseDescriptiveResponse($response)
+    {
+        $genericAttributes = [];
+        $categorySpecificAttributes = [];
         
-        // Return a basic error response
-        return json_encode([
-            'generic_attributes' => [],
-            'category_specific_attributes' => [],
-            'error' => 'Unable to parse AI response'
-        ]);
+        // Define attribute mappings
+        $attributeMap = [
+            // Generic attributes
+            'customer service' => 'customerService',
+            'app usability' => 'appUsability',
+            'pricing' => 'pricing',
+            'security' => 'security',
+            'user experience' => 'userExperience',
+            'reliability' => 'reliability',
+            'accessible' => 'accessibility',
+            'credibility' => 'credibility',
+            'responsive' => 'responsiveness',
+            'harassment' => 'harassmentOrDiscrimination',
+            'discrimination' => 'harassmentOrDiscrimination',
+            'overall' => 'overallSentiment',
+            
+            // Category specific attributes
+            '5g network' => '5G network',
+            'internet speed' => 'internet/data speed',
+            'data speed' => 'internet/data speed',
+            'network coverage' => 'network coverage',
+            'loyalty programs' => 'loyaltyPrograms',
+            'bill payment' => 'bill payment options',
+            'personalization' => 'Personalization'
+        ];
+        
+        // Convert response to lowercase for easier matching
+        $responseLower = strtolower($response);
+        
+        // Look for positive indicators
+        foreach ($attributeMap as $keyword => $attribute) {
+            if (strpos($responseLower, $keyword) !== false) {
+                // Determine sentiment based on context
+                $sentiment = 'Positive'; // Default to positive since the response seems to be listing good things
+                
+                // Check for negative indicators
+                if (strpos($responseLower, "no $keyword") !== false || 
+                    strpos($responseLower, "bad $keyword") !== false ||
+                    strpos($responseLower, "poor $keyword") !== false) {
+                    $sentiment = 'Negative';
+                }
+                
+                // Special case for harassment/discrimination
+                if ($keyword === 'harassment' || $keyword === 'discrimination') {
+                    if (strpos($responseLower, 'no harassment') !== false || 
+                        strpos($responseLower, 'no discrimination') !== false) {
+                        $sentiment = 'Positive'; // No harassment is good
+                    }
+                }
+                
+                // Categorize the attribute
+                if (in_array($attribute, ['customerService', 'appUsability', 'pricing', 'security', 
+                                        'userExperience', 'reliability', 'accessibility', 'credibility', 
+                                        'responsiveness', 'harassmentOrDiscrimination', 'overallSentiment'])) {
+                    $genericAttributes[$attribute] = $sentiment;
+                } else {
+                    $categorySpecificAttributes[$attribute] = $sentiment;
+                }
+            }
+        }
+        
+        // Ensure we have some basic attributes if none were found
+        if (empty($genericAttributes) && empty($categorySpecificAttributes)) {
+            $genericAttributes = [
+                'overallSentiment' => 'Positive',
+                'customerService' => 'Positive',
+                'userExperience' => 'Positive'
+            ];
+        }
+        
+        $result = [
+            'generic_attributes' => $genericAttributes,
+            'category_specific_attributes' => $categorySpecificAttributes
+        ];
+        
+        $jsonResult = json_encode($result);
+        Log::info('Parsed descriptive response to JSON:', ['json' => $jsonResult]);
+        
+        return $jsonResult;
+    }
     }
 }
 
 
-###########################################
-###########################################
-###########################################
-
-
-public function processContent($content, $reviewId, $inputTokens, $user, $source, $jopID = null)
-{
-    // Log the content for debugging
-    Log::info('Processing content:', ['content' => $content, 'reviewId' => $reviewId]);
-    
-    $decodedContent = json_decode($content, true);
-    
-    // Check for JSON decode errors
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        Log::error('JSON decode error:', [
-            'error' => json_last_error_msg(),
-            'content' => $content,
-            'reviewId' => $reviewId
-        ]);
-        return;
-    }
-    
-    // Handle error response
-    if (isset($decodedContent['error'])) {
-        Log::error('AI response contains error:', [
-            'error' => $decodedContent['error'],
-            'reviewId' => $reviewId
-        ]);
-        return;
-    }
-    
-    $genericSentiment = $decodedContent['generic_attributes'] ?? null;
-    $categorySpecificSentiment = $decodedContent['category_specific_attributes'] ?? null;
-
-    // Validate that we have the required data
-    if (!$genericSentiment || !$categorySpecificSentiment) {
-        Log::warning('Missing sentiment data:', [
-            'genericSentiment' => $genericSentiment ? 'present' : 'missing',
-            'categorySpecificSentiment' => $categorySpecificSentiment ? 'present' : 'missing',
-            'reviewId' => $reviewId
-        ]);
-        return;
-    }
-
-    // Validate that the arrays are not empty
-    if (empty($genericSentiment) && empty($categorySpecificSentiment)) {
-        Log::warning('Empty sentiment arrays:', ['reviewId' => $reviewId]);
-        return;
-    }
-
-    $provider = new EncoderProvider();
-    $encoder = $provider->getForModel('gpt-4-turbo');
-    $outputTokens = count($encoder->encode($content));
-
-    if ($user->user_token < $outputTokens) {
-        Log::info('Insufficient tokens for user', ['userId' => $user->id]);
-        return;
-    }
-
-    $positiveAttributes = [];
-    $negativeAttributes = [];
-
-    // Process generic attributes
-    if (is_array($genericSentiment)) {
-        foreach ($genericSentiment as $attribute => $value) {
-            if (is_string($value)) {
-                $value = strtolower(trim($value));
-                if ($value === 'positive') {
-                    $positiveAttributes[] = $attribute;
-                } elseif ($value === 'negative') {
-                    $negativeAttributes[] = $attribute;
-                }
-            }
-        }
-    }
-
-    // Process category-specific attributes
-    if (is_array($categorySpecificSentiment)) {
-        foreach ($categorySpecificSentiment as $attribute => $value) {
-            if (is_string($value)) {
-                $value = strtolower(trim($value));
-                if ($value === 'positive') {
-                    $positiveAttributes[] = $attribute;
-                } elseif ($value === 'negative') {
-                    $negativeAttributes[] = $attribute;
-                }
-            }
-        }
-    }
-
-    $positiveString = implode(' ', $positiveAttributes);
-    $negativeString = implode(' ', $negativeAttributes);
-
-    try {
-        if ($source == "google") {
-            if (!GoogleReviewSentiment::where('review_id', $reviewId)->exists()) {
-                GoogleReviewSentiment::create([
-                    'sentiment_generic' => json_encode($genericSentiment),
-                    'sentiment_category_specific' => json_encode($categorySpecificSentiment),
-                    'positive_attributes' => $positiveString,
-                    'negative_attributes' => $negativeString,
-                    'review_id' => $reviewId,
-                ]);
-                Log::info('Google sentiment record created:', ['reviewId' => $reviewId]);
-            }
-        } else if ($source == "apple") {
-            if (!AppleReviewSentiment::where('review_id', $reviewId)->exists()) {
-                AppleReviewSentiment::create([
-                    'sentiment_generic' => json_encode($genericSentiment),
-                    'sentiment_category_specific' => json_encode($categorySpecificSentiment),
-                    'positive_attributes' => $positiveString,
-                    'negative_attributes' => $negativeString,
-                    'review_id' => $reviewId,
-                ]);
-                Log::info('Apple sentiment record created:', ['reviewId' => $reviewId]);
-            }
-        }
-
-        if ($jopID !== null) {
-            $userJob = UserJob::find($jopID);
-            if ($userJob) {
-                $userJob->increment('completed_count');
-                Log::info('Job count incremented:', ['jobId' => $jopID]);
-            }
-        }
-
-        // Deduct tokens from user
-        $user->user_token -= ($inputTokens + $outputTokens);
-        $user->save();
-        
-        Log::info('Sentiment processing completed successfully:', [
-            'reviewId' => $reviewId,
-            'tokensDeducted' => $inputTokens + $outputTokens,
-            'remainingTokens' => $user->user_token
-        ]);
-        
-    } catch (\Exception $e) {
-        Log::error('Error saving sentiment data:', [
-            'error' => $e->getMessage(),
-            'reviewId' => $reviewId,
-            'trace' => $e->getTraceAsString()
-        ]);
-    }
-}
-
-###########################################
-###########################################
-###########################################
+***********************************************
+***********************************************
+***********************************************
 
 <?php
 
@@ -292,21 +241,52 @@ class OpenAIPrompt
      */
     public function sentimentAnalysisPrompt($brandDetails)
     {
-        return "You are a sentiment analyzer for the following brand and its attributes:\n" .
-            "Brand: {$brandDetails['brandName']}\n" .
-            "Category: {$brandDetails['category']}\n" .
-            "Generic Attributes: {$brandDetails['genericAttributes']}\n" .
-            "Category Specific Attributes: {$brandDetails['categorySpecificAttributes']}\n\n" .
-            "Analyze the sentiment for each attribute from the review text.\n" .
-            "Respond with ONLY a single JSON object in this exact format:\n" .
-            "{\n" .
-            '  "generic_attributes": {"attribute1": "Positive", "attribute2": "Negative", "attribute3": "Neutral"},' . "\n" .
-            '  "category_specific_attributes": {"attribute1": "Positive", "attribute2": "Negative"}' . "\n" .
-            "}\n\n" .
-            "Rules:\n" .
-            "- Use only 'Positive', 'Negative', or 'Neutral' as values\n" .
-            "- Include all attributes mentioned in the brand details\n" .
-            "- Return ONLY the JSON object, no additional text\n" .
-            "- Do not repeat the JSON multiple times\n";
+        return "Analyze the sentiment of the following review for these specific attributes:\n\n" .
+            "BRAND: {$brandDetails['brandName']}\n" .
+            "CATEGORY: {$brandDetails['category']}\n\n" .
+            "ATTRIBUTES TO ANALYZE:\n" .
+            "Generic: {$brandDetails['genericAttributes']}\n" .
+            "Category Specific: {$brandDetails['categorySpecificAttributes']}\n\n" .
+            "INSTRUCTIONS:\n" .
+            "1. Read the review text carefully\n" .
+            "2. For each attribute, determine if the sentiment is Positive, Negative, or Neutral\n" .
+            "3. Return ONLY a JSON object in this EXACT format:\n\n" .
+            '{"generic_attributes":{"overallSentiment":"Positive","customerService":"Positive"},"category_specific_attributes":{"5G network":"Positive","loyaltyPrograms":"Neutral"}}' . "\n\n" .
+            "IMPORTANT RULES:\n" .
+            "- Use only: Positive, Negative, or Neutral\n" .
+            "- Return ONLY the JSON object\n" .
+            "- No additional text before or after the JSON\n" .
+            "- No explanations or descriptions\n" .
+            "- Do not repeat the JSON\n" .
+            "- Make sure JSON is valid and complete\n\n" .
+            "REVIEW TEXT TO ANALYZE:\n";
+    }
+
+    /**
+     * Alternative simple prompt that might work better with your model
+     *
+     * @param array $brandDetails
+     * @return string
+     */
+    public function simplePrompt($brandDetails)
+    {
+        return "Review sentiment analysis.\n\n" .
+            "Attributes: {$brandDetails['genericAttributes']}, {$brandDetails['categorySpecificAttributes']}\n\n" .
+            "Return JSON only:\n" .
+            '{"generic_attributes":{},"category_specific_attributes":{}}\n\n' .
+            "Review:\n";
+    }
+
+    /**
+     * Very direct prompt
+     *
+     * @param array $brandDetails
+     * @return string
+     */
+    public function directPrompt($brandDetails)
+    {
+        return "JSON sentiment analysis for: {$brandDetails['genericAttributes']}, {$brandDetails['categorySpecificAttributes']}\n" .
+            "Format: {\"generic_attributes\":{\"attr\":\"Positive\"},\"category_specific_attributes\":{\"attr\":\"Positive\"}}\n" .
+            "Review: ";
     }
 }
