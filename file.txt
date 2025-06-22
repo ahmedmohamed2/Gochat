@@ -1,1 +1,312 @@
-{"choices":[{"message":{"content":"app, good customer service, good 5G network, good internet speed, good bill payment options, good network coverage, good personalization, good loyalty programs, good responsiveness, good credibility, good reliability, good accessibility, good security, good user experience, good overall experience, no harassment or discrimination, good pricing, easy to access, good app usability, good what did the customer suggest, good what product did the customer mention \n{\"generic_attributes\": {\"overallSentiment\": \"Positive\", \"customerService\": \"Positive\", \"appUsability\": \"Positive\", \"pricing\": \"Positive\", \"security\": \"Positive\", \"userExperience\": \"Positive\", \"reliability\": \"Positive\", \"accessibility\": \"Positive\", \"credibility\": \"Positive\", \"responsiveness\": \"Positive\", \"harassmentOrDiscrimination\": \"Negative\", \"whatDidTheCustomerSuggest\": \"Positive\", \"whatProductDidTheCustomerMention\": \"Positive\"}, \"category_specific_attributes\": {\"5G network\": \"Positive\", \"bill payment options\": \"Positive\", \"internet\\\/data speed\": \"Positive\", \"loyaltyPrograms\": \"Positive\", \"network coverage\": \"Positive\", \"Personalization\": \"Positive\"}} \n{\"generic_attributes\": {\"overallSentiment\": \"Positive\", \"customerService\": \"Positive\", \"appUsability\": \"Positive\", \"pricing\": \"Positive\", \"security\": \"Positive\", \"userExperience\": \"Positive\", \"reliability\": \"Positive\", \"accessibility\": \"Positive\", \"credibility\": \"Positive\", \"responsiveness\": \"Positive\", \"harassmentOrDiscrimination\": \"Negative\", \"whatDidTheCustomerSuggest\": \"Positive\", \"whatProductDidTheCustomerMention\": \"Positive\"}, \"category_specific_attributes\": {\"5G network\": \"Positive\", \"bill payment options\": \"Positive\", \"internet\\\/data speed\": \"Positive\", \"loyaltyPrograms\": \"Positive\", \"network coverage\": \"Positive\", \"Personalization\": \"Positive\"}} \n{\"generic_attributes\": {\"overallSentiment\": \"Positive\", \"customerService\": \"Positive\", \"appUsability\": \"Positive\", \"pricing\": \"Positive\", \"security\": \"Positive\", \"userExperience\": \"Positive\", \"reliability\": \"Positive\", \"accessibility\": \"Positive\", \"credibility\": \"Positive\", \"responsiveness\": \"Positive\", \"harassmentOrDiscrimination\": \"Negative\", \"whatDidTheCustomerSuggest\": \"Positive\", \"whatProductDidTheCustomerMention\": \"Positive\"}, \"category_specific_attributes\": {\"5G network\": \"Positive\", \"bill payment options\": \"Positive\", \"internet\\\/data speed\": \"Positive\", \"loyaltyPrograms\": \"Positive\", \"network coverage\": \"Positive\", \"Personalization\": \"Positive\"}} \n{\"generic_attributes\": {\"overallSentiment\": \"Positive\", \"customerService\": \"Positive\", \"appUsability\": \"Positive\", \"pricing\": \"Positive\", \"security\": \"Positive\", \"userExperience\": \"Positive\", \"reliability\": \"Positive\", \"accessibility\": \"Positive\", \"credibility\": \"Positive\", \"responsiveness\": \"Positive\", \"harassmentOrDiscrimination\": \"Negative\", \"whatDidTheCustomerSuggest\": \"Positive\", \"whatProductDidTheCustomerMention\": \"Positive\"}, \"category_specific_attributes\": {\"5G network\": \"Positive\", \"bill payment options\": \"Positive\", \"internet\\\/data speed\": \"Positive\", \"loyaltyPrograms\": \"Positive\", \"network coverage\": \"Positive\", \"Personalization\": \"Positive\"}} \n{\"generic_attributes\": {\"overallSentiment\": \"Positive\", \"customerService\": \"Positive\", \"appUsability\": \"Positive\", \"pricing\": \"Positive\", \"security\": \"Positive\", \"userExperience\": \"Positive\", \"reliability\": \"Positive\", \"accessibility\": \"Positive\", \"credibility\": \"Positive\", \"responsiveness\": \"Positive\", \"harassmentOrDiscrimination\": \"Negative\", \"whatDidTheCustomerSuggest\": \"Positive\", \"whatProductDidTheCustomerMention\": \"Positive\"}, \"category_specific_attributes\": {\"5G network\": \"Positive\", \"bill payment options\": \"Positive\", \"internet\\\/data speed\": \"Positive\", \"loyaltyPrograms\": \"Positive\", \"network coverage\": \"Positive\", \"Personalization\": \"Positive\"}} \n{\"generic_attributes\": {\"overallSentiment\": \"Positive\", \"customerService\": \"Positive\", \"appUsability\": \"Positive\", \"pricing\": \"Positive\", \"security\": \"Positive\", \"userExperience\": \"Positive\", \"reliability\": \"Positive\", \"accessibility\": \"Positive\", \"credibility\": \"Positive\", \"responsiveness\": \"Positive\", \"harassmentOrDiscrimination\": \"Negative\", \"whatDidTheCustomerS"}}]}
+<?php
+
+namespace App\Services;
+
+use GuzzleHttp\Client;
+use Illuminate\Support\Facades\Log;
+
+class OpenAIConfig
+{
+    protected $apiUrl;
+    protected $client;
+    protected $model;
+
+    public function __construct()
+    {
+        $this->apiUrl = env('LOCAL_AI_API_URL', 'http://10.58.38.218:30011/v1/completions');
+        $this->model = env('LOCAL_AI_MODEL', '/mnt/data/llms/Llama-3.3-70B-Instruct');
+        $this->client = new Client();
+    }
+
+    /**
+     * Sends a request to Local AI API with a given prompt and review.
+     *
+     * @param string $prompt
+     * @param string $reviewText
+     * @return array|null
+     */
+    public function sendRequest($prompt, $reviewText)
+    {
+        // Combine system prompt and user content into a single prompt
+        $combinedPrompt = $prompt . "\n\nReview Text: " . $reviewText;
+
+        $requestBody = [
+            'model' => $this->model,
+            'prompt' => $combinedPrompt,
+            'temperature' => 0.0,
+            'top_p' => 0.95,
+            'max_tokens' => 1000, // Reduced from 4096 for faster response
+        ];
+
+        try {
+            $response = $this->client->post($this->apiUrl, [
+                'headers' => [
+                    'Content-Type' => 'application/json',
+                ],
+                'json' => $requestBody,
+                'proxy' => [
+                    'http' => null,
+                    'https' => null,
+                ],
+                'timeout' => 300, // 5 minutes
+                'connect_timeout' => 30, // 30 seconds for connection
+            ]);
+
+            $responseBody = json_decode($response->getBody()->getContents(), true);
+
+            // Extract the text from the response structure
+            if (isset($responseBody['choices'][0]['text'])) {
+                $rawContent = trim($responseBody['choices'][0]['text']);
+                $cleanedContent = $this->extractAndCleanJsonFromResponse($rawContent);
+                
+                return [
+                    'choices' => [
+                        [
+                            'message' => [
+                                'content' => $cleanedContent
+                            ]
+                        ]
+                    ]
+                ];
+            }
+
+            return $responseBody;
+        } catch (\Exception $e) {
+            Log::error('Local AI API Request Failed: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Extract and clean JSON from the AI response
+     *
+     * @param string $rawResponse
+     * @return string
+     */
+    private function extractAndCleanJsonFromResponse($rawResponse)
+    {
+        // Log the raw response for debugging
+        Log::info('Raw AI Response:', ['response' => $rawResponse]);
+
+        // Find all JSON objects in the response
+        preg_match_all('/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/', $rawResponse, $matches);
+        
+        if (!empty($matches[0])) {
+            // Get the first complete JSON object
+            $jsonString = $matches[0][0];
+            
+            // Validate that it's proper JSON
+            $decoded = json_decode($jsonString, true);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                Log::info('Extracted JSON:', ['json' => $jsonString]);
+                return $jsonString;
+            }
+        }
+
+        // If no valid JSON found, try to extract from lines containing JSON-like content
+        $lines = explode("\n", $rawResponse);
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if (strpos($line, '{') === 0 && strpos($line, '}') !== false) {
+                $decoded = json_decode($line, true);
+                if (json_last_error() === JSON_ERROR_NONE) {
+                    Log::info('Extracted JSON from line:', ['json' => $line]);
+                    return $line;
+                }
+            }
+        }
+
+        // If still no valid JSON, try to construct a basic response
+        Log::warning('No valid JSON found in response, attempting to construct basic response');
+        
+        // Return a basic error response
+        return json_encode([
+            'generic_attributes' => [],
+            'category_specific_attributes' => [],
+            'error' => 'Unable to parse AI response'
+        ]);
+    }
+    }
+}
+
+###########################################
+###########################################
+###########################################
+
+
+public function processContent($content, $reviewId, $inputTokens, $user, $source, $jopID = null)
+{
+    // Log the content for debugging
+    Log::info('Processing content:', ['content' => $content, 'reviewId' => $reviewId]);
+    
+    $decodedContent = json_decode($content, true);
+    
+    // Check for JSON decode errors
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        Log::error('JSON decode error:', [
+            'error' => json_last_error_msg(),
+            'content' => $content,
+            'reviewId' => $reviewId
+        ]);
+        return;
+    }
+    
+    // Handle error response
+    if (isset($decodedContent['error'])) {
+        Log::error('AI response contains error:', [
+            'error' => $decodedContent['error'],
+            'reviewId' => $reviewId
+        ]);
+        return;
+    }
+    
+    $genericSentiment = $decodedContent['generic_attributes'] ?? null;
+    $categorySpecificSentiment = $decodedContent['category_specific_attributes'] ?? null;
+
+    // Validate that we have the required data
+    if (!$genericSentiment || !$categorySpecificSentiment) {
+        Log::warning('Missing sentiment data:', [
+            'genericSentiment' => $genericSentiment ? 'present' : 'missing',
+            'categorySpecificSentiment' => $categorySpecificSentiment ? 'present' : 'missing',
+            'reviewId' => $reviewId
+        ]);
+        return;
+    }
+
+    // Validate that the arrays are not empty
+    if (empty($genericSentiment) && empty($categorySpecificSentiment)) {
+        Log::warning('Empty sentiment arrays:', ['reviewId' => $reviewId]);
+        return;
+    }
+
+    $provider = new EncoderProvider();
+    $encoder = $provider->getForModel('gpt-4-turbo');
+    $outputTokens = count($encoder->encode($content));
+
+    if ($user->user_token < $outputTokens) {
+        Log::info('Insufficient tokens for user', ['userId' => $user->id]);
+        return;
+    }
+
+    $positiveAttributes = [];
+    $negativeAttributes = [];
+
+    // Process generic attributes
+    if (is_array($genericSentiment)) {
+        foreach ($genericSentiment as $attribute => $value) {
+            if (is_string($value)) {
+                $value = strtolower(trim($value));
+                if ($value === 'positive') {
+                    $positiveAttributes[] = $attribute;
+                } elseif ($value === 'negative') {
+                    $negativeAttributes[] = $attribute;
+                }
+            }
+        }
+    }
+
+    // Process category-specific attributes
+    if (is_array($categorySpecificSentiment)) {
+        foreach ($categorySpecificSentiment as $attribute => $value) {
+            if (is_string($value)) {
+                $value = strtolower(trim($value));
+                if ($value === 'positive') {
+                    $positiveAttributes[] = $attribute;
+                } elseif ($value === 'negative') {
+                    $negativeAttributes[] = $attribute;
+                }
+            }
+        }
+    }
+
+    $positiveString = implode(' ', $positiveAttributes);
+    $negativeString = implode(' ', $negativeAttributes);
+
+    try {
+        if ($source == "google") {
+            if (!GoogleReviewSentiment::where('review_id', $reviewId)->exists()) {
+                GoogleReviewSentiment::create([
+                    'sentiment_generic' => json_encode($genericSentiment),
+                    'sentiment_category_specific' => json_encode($categorySpecificSentiment),
+                    'positive_attributes' => $positiveString,
+                    'negative_attributes' => $negativeString,
+                    'review_id' => $reviewId,
+                ]);
+                Log::info('Google sentiment record created:', ['reviewId' => $reviewId]);
+            }
+        } else if ($source == "apple") {
+            if (!AppleReviewSentiment::where('review_id', $reviewId)->exists()) {
+                AppleReviewSentiment::create([
+                    'sentiment_generic' => json_encode($genericSentiment),
+                    'sentiment_category_specific' => json_encode($categorySpecificSentiment),
+                    'positive_attributes' => $positiveString,
+                    'negative_attributes' => $negativeString,
+                    'review_id' => $reviewId,
+                ]);
+                Log::info('Apple sentiment record created:', ['reviewId' => $reviewId]);
+            }
+        }
+
+        if ($jopID !== null) {
+            $userJob = UserJob::find($jopID);
+            if ($userJob) {
+                $userJob->increment('completed_count');
+                Log::info('Job count incremented:', ['jobId' => $jopID]);
+            }
+        }
+
+        // Deduct tokens from user
+        $user->user_token -= ($inputTokens + $outputTokens);
+        $user->save();
+        
+        Log::info('Sentiment processing completed successfully:', [
+            'reviewId' => $reviewId,
+            'tokensDeducted' => $inputTokens + $outputTokens,
+            'remainingTokens' => $user->user_token
+        ]);
+        
+    } catch (\Exception $e) {
+        Log::error('Error saving sentiment data:', [
+            'error' => $e->getMessage(),
+            'reviewId' => $reviewId,
+            'trace' => $e->getTraceAsString()
+        ]);
+    }
+}
+
+###########################################
+###########################################
+###########################################
+
+<?php
+
+namespace App\Services;
+
+class OpenAIPrompt
+{
+    /**
+     * Generates a sentiment analysis prompt based on brand details.
+     *
+     * @param array $brandDetails
+     * @return string
+     */
+    public function sentimentAnalysisPrompt($brandDetails)
+    {
+        return "You are a sentiment analyzer for the following brand and its attributes:\n" .
+            "Brand: {$brandDetails['brandName']}\n" .
+            "Category: {$brandDetails['category']}\n" .
+            "Generic Attributes: {$brandDetails['genericAttributes']}\n" .
+            "Category Specific Attributes: {$brandDetails['categorySpecificAttributes']}\n\n" .
+            "Analyze the sentiment for each attribute from the review text.\n" .
+            "Respond with ONLY a single JSON object in this exact format:\n" .
+            "{\n" .
+            '  "generic_attributes": {"attribute1": "Positive", "attribute2": "Negative", "attribute3": "Neutral"},' . "\n" .
+            '  "category_specific_attributes": {"attribute1": "Positive", "attribute2": "Negative"}' . "\n" .
+            "}\n\n" .
+            "Rules:\n" .
+            "- Use only 'Positive', 'Negative', or 'Neutral' as values\n" .
+            "- Include all attributes mentioned in the brand details\n" .
+            "- Return ONLY the JSON object, no additional text\n" .
+            "- Do not repeat the JSON multiple times\n";
+    }
+}
