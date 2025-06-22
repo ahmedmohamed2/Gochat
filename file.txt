@@ -1,19 +1,82 @@
-Set Up Automatic Renewal
-To prevent this from happening again:
+<?php
 
-# Add cron job for automatic sync
-(crontab -l 2>/dev/null; echo "*/10 * * * * /usr/local/bin/sync-nginx-krb5.sh") | sudo crontab -
+namespace App\Services;
 
-# Verify cron job is set
-sudo crontab -l
+use GuzzleHttp\Client;
+use Illuminate\Support\Facades\Log;
 
-**********************************
+class OpenAIConfig
+{
+    protected $apiUrl;
+    protected $client;
+    protected $model;
 
-Monitor the Setup
-You can monitor the sync with:
+    public function __construct()
+    {
+        $this->apiUrl = env('LOCAL_AI_API_URL', 'http://10.58.38.218:30011/v1/completions');
+        $this->model = env('LOCAL_AI_MODEL', '/mnt/data/llms/Llama-3.3-70B-Instruct');
+        $this->client = new Client();
+    }
 
-# Watch the sync log
-tail -f /var/log/krb5-nginx-sync.log
+    /**
+     * Sends a request to Local AI API with a given prompt and review.
+     *
+     * @param string $prompt
+     * @param string $reviewText
+     * @return array|null
+     */
+    public function sendRequest($prompt, $reviewText)
+    {
+        // Combine system prompt and user content into a single prompt
+        $combinedPrompt = $prompt . "\n\nReview Text: " . $reviewText;
 
-# Check ticket status anytime
-sudo -u nginx klist -c /tmp/krb5cc_nginx
+        $requestBody = [
+            'model' => $this->model,
+            'prompt' => $combinedPrompt,
+            'temperature' => 0.0,
+            'top_p' => 0.95,
+            'max_tokens' => 4096,
+        ];
+
+        try {
+            $response = $this->client->post($this->apiUrl, [
+                'headers' => [
+                    'Content-Type' => 'application/json',
+                ],
+                'json' => $requestBody,
+                'proxy' => [
+                    'http' => null,
+                    'https' => null,
+                ],
+            ]);
+
+            $responseBody = json_decode($response->getBody()->getContents(), true);
+
+            // Extract the text from the response structure
+            if (isset($responseBody['choices'][0]['text'])) {
+                return [
+                    'choices' => [
+                        [
+                            'message' => [
+                                'content' => trim($responseBody['choices'][0]['text'])
+                            ]
+                        ]
+                    ]
+                ];
+            }
+
+            return $responseBody;
+        } catch (\Exception $e) {
+            Log::error('Local AI API Request Failed: ' . $e->getMessage());
+            return null;
+        }
+    }
+}
+
+
+
+
+
+
+LOCAL_AI_API_URL=http://10.58.38.218:30011/v1/completions
+LOCAL_AI_MODEL=/mnt/data/llms/Llama-3.3-70B-Instruct
