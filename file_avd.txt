@@ -1,7 +1,6 @@
-[2025-06-23 15:02:20] local.INFO: Sending AI request: {"url":"http://10.58.38.218:30011/v1/completions","promptLength":1250} 
-[2025-06-23 15:02:31] local.INFO: AI response received: {"statusCode":200,"hasChoices":true,"hasText":true} 
-[2025-06-23 15:02:31] local.INFO: Raw AI content received: {"contentLength":2360,"contentPreview":"network. The customer service is very helpful and they are always available to assist. The app is ve..."} 
-[2025-06-23 15:02:31] local.INFO: Extracted valid JSON from response  
-[2025-06-23 15:02:31] local.INFO: Processing content: {"content":"{\"generic_attributes\":{\"overallSentiment\":\"Positive\",\"customerService\":\"Positive\",\"appUsability\":\"Positive\",\"pricing\":\"Positive\",\"security\":\"Positive\",\"userExperience\":\"Positive\",\"reliability\":\"Neutral\",\"accessibility\":\"Neutral\",\"credibility\":\"Neutral\",\"responsiveness\":\"Positive\",\"harassmentOrDiscrimination\":\"Negative\",\"whatDidTheCustomerSuggest\":\"improve 5G network coverage\",\"whatProductDidTheCustomerMention\":\"e& postpaid plan\"},\"category_specific_attributes\":{\"5G network\":\"Negative\",\"bill payment options\":\"Positive\",\"internet\\/data speed\":\"Positive\",\"loyaltyPrograms\":\"Neutral\",\"network coverage\":\"Positive\",\"Personalization\":\"Neutral\"}}","reviewId":"5928"} 
-[2025-06-23 15:02:31] local.INFO: Google sentiment record created: {"reviewId":"5928"} 
-[2025-06-23 15:02:31] local.INFO: Sentiment processing completed successfully: {"reviewId":"5928","tokensDeducted":398,"remainingTokens":1608} 
+[root@DX00133 ~]# curl -X POST http://10.58.38.218:30011/v1/completions   -H "Content-Type: application/json"   -d '{
+    "model": "/mnt/data/llms/Llama-3.3-70B-Instruct",
+    "prompt": "Hello, please respond with: I am working",
+    "temperature": 0.0,
+    "max_tokens": 50
+  }'
