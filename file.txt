@@ -368,6 +368,86 @@ class ProcessGooglePlayAnalysis implements ShouldQueue
                 }
             }
 
+            broadcast(new NewSentimentEvent());
+
+        } catch (\Exception $e) {
+            Log::error("Job failed: {$e->getMessage()}", [
+                'userId' => $this->userId,
+                'appId' => $validatedData['appId'] ?? null,
+                'exception' => $e,
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            // Update job status to failed
+            if ($job) {
+                try {
+                    $job->refresh();
+                    $job->update(['status' => 'failed']);
+                } catch (\Exception $updateException) {
+                    Log::error('Failed to update job status to failed', [
+                        'jobId' => $job->id ?? 'unknown',
+                        'error' => $updateException->getMessage()
+                    ]);
+                }
+            } else {
+                // Try to find job by job_id if $job is null
+                try {
+                    $failedJob = UserJob::where('job_id', $this->job->getJobId())->first();
+                    if ($failedJob) {
+                        $failedJob->update(['status' => 'failed']);
+                    }
+                } catch (\Exception $findException) {
+                    Log::error('Failed to find and update job', [
+                        'error' => $findException->getMessage()
+                    ]);
+                }
+            }
+
+            // Re-throw the exception to trigger retry mechanism
+            throw $e;
+        }
+    }
+
+    /**
+     * Handle a job failure.
+     */
+    public function failed(\Throwable $exception)
+    {
+        Log::error('ProcessGooglePlayAnalysis job permanently failed', [
+            'userId' => $this->userId,
+            'requestData' => $this->requestData,
+            'error' => $exception->getMessage(),
+            'trace' => $exception->getTraceAsString()
+        ]);
+
+        // Try to update job status to failed
+        try {
+            $failedJob = UserJob::where('job_id', $this->job->getJobId())->first();
+            if ($failedJob) {
+                $failedJob->update(['status' => 'failed']);
+                Log::info('Job status updated to failed', ['jobId' => $failedJob->id]);
+            }
+        } catch (\Exception $e) {
+            Log::error('Failed to update job status in failed method', [
+                'error' => $e->getMessage()
+            ]);
+        }
+
+        // Optionally notify user of failure
+        try {
+            $user = User::find($this->userId);
+            if ($user) {
+                // You can create a failure notification here if needed
+                // $user->notify(new SentimentAnalysisFailedNotification($this->requestData['appId']));
+            }
+        } catch (\Exception $e) {
+            Log::error('Failed to send failure notification', [
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+}
+
 ###################################################
 ###################################################
 ###################################################
