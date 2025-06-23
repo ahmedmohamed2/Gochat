@@ -38,85 +38,47 @@ class OpenAIConfig
             'max_tokens' => 500,
         ];
 
-        // Try the primary endpoint first
-        $response = $this->makeRequest($requestBody);
-        
-        if ($response) {
-            return $response;
-        }
-
-        // If primary fails, try alternative endpoints
-        $alternativeEndpoints = [
-            'http://10.58.38.218:30011/v1/chat/completions',
-            'http://10.58.38.218:30011/completions',
-            'http://10.58.38.218:30011/api/v1/completions'
-        ];
-
-        foreach ($alternativeEndpoints as $endpoint) {
-            Log::info('Trying alternative endpoint:', ['endpoint' => $endpoint]);
-            $originalUrl = $this->apiUrl;
-            $this->apiUrl = $endpoint;
-            
-            $response = $this->makeRequest($requestBody);
-            
-            if ($response) {
-                Log::info('Alternative endpoint worked:', ['endpoint' => $endpoint]);
-                return $response;
-            }
-            
-            $this->apiUrl = $originalUrl; // Reset to original
-        }
-
-        Log::error('All endpoints failed');
-        return null;
-    }
-
-    /**
-     * Make the actual HTTP request
-     */
-    private function makeRequest($requestBody)
-    {
-
-    /**
-     * Make the actual HTTP request
-     */
-    private function makeRequest($requestBody)
-    {
         try {
+            Log::info('Sending AI request:', [
+                'url' => $this->apiUrl,
+                'requestBody' => $requestBody
+            ]);
+
             $response = $this->client->post($this->apiUrl, [
                 'headers' => [
                     'Content-Type' => 'application/json',
                 ],
                 'json' => $requestBody,
                 'proxy' => [
-                    'http' => false,   // Completely disable proxy
-                    'https' => false,  // Completely disable proxy
-                    'no' => ['*']      // Don't use proxy for any address
+                    'http' => null,
+                    'https' => null,
                 ],
                 'timeout' => 300,
                 'connect_timeout' => 30,
                 'verify' => false,
-                'curl' => [
-                    CURLOPT_PROXY => '',           // Disable proxy
-                    CURLOPT_NOPROXY => '*',        // No proxy for all addresses
-                    CURLOPT_PROXYTYPE => 0,        // Disable proxy type
-                ]
             ]);
 
             $responseBody = json_decode($response->getBody()->getContents(), true);
-            
-            // Add detailed logging for debugging
-            Log::info('AI API Response Details:', [
+
+            Log::info('AI response received:', [
                 'statusCode' => $response->getStatusCode(),
-                'headers' => $response->getHeaders(),
-                'body' => $responseBody,
-                'requestBody' => $requestBody
+                'responseBody' => $responseBody
             ]);
 
             // Extract the text from the response structure
             if (isset($responseBody['choices'][0]['text'])) {
                 $rawContent = trim($responseBody['choices'][0]['text']);
+                
+                Log::info('Raw AI content:', [
+                    'rawContent' => $rawContent,
+                    'contentLength' => strlen($rawContent)
+                ]);
+                
                 $cleanedContent = $this->extractAndCleanJsonFromResponse($rawContent);
+                
+                Log::info('Cleaned AI content:', [
+                    'cleanedContent' => $cleanedContent
+                ]);
                 
                 return [
                     'choices' => [
@@ -127,9 +89,12 @@ class OpenAIConfig
                         ]
                     ]
                 ];
+            } else {
+                Log::warning('No choices[0].text in response:', [
+                    'responseBody' => $responseBody
+                ]);
             }
 
-            Log::warning('AI response missing expected structure:', ['responseBody' => $responseBody]);
             return $responseBody;
         } catch (\Exception $e) {
             Log::error('Local AI API Request Failed: ' . $e->getMessage(), [
