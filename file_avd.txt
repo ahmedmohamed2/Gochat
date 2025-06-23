@@ -1,249 +1,219 @@
-<?php
+[2025-06-23 13:37:53] local.INFO: Starting batch processing {"totalReviews":5,"userId":1,"appId":1,"jobId":32} 
+[2025-06-23 13:37:53] local.INFO: Processing review {"reviewId":5923,"reviewIndex":1,"totalReviews":5,"inputTokens":253} 
+[2025-06-23 13:37:53] local.INFO: Sending AI request: {"url":"http://10.58.38.218:30011/v1/completions","requestBody":{"model":"/mnt/data/llms/Llama-3.3-70B-Instruct","prompt":"Analyze the sentiment of the following review for these specific attributes:
 
-namespace App\Services;
+BRAND: e& UAE
+CATEGORY: Telecom
 
-use GuzzleHttp\Client;
-use Illuminate\Support\Facades\Log;
+ATTRIBUTES TO ANALYZE:
+Generic: {\"overallSentiment\":\"\",\"customerService\":\"\",\"appUsability\":\"\",\"pricing\":\"\",\"security\":\"\",\"userExperience\":\"\",\"reliability\":\"\",\"accessibility\":\"\",\"credibility\":\"\",\"responsiveness\":\"\",\"harassmentOrDiscrimination\":\"\",\"whatDidTheCustomerSuggest\":\"\",\"whatProductDidTheCustomerMention\":\"\"}
+Category Specific: {\"5G network\":\"\",\"bill payment options\":\"\",\"internet\\/data speed\":\"\",\"loyaltyPrograms\":\"\",\"network coverage\":\"\",\"Personalization\":\"\"}
 
-class OpenAIConfig
-{
-    protected $apiUrl;
-    protected $client;
-    protected $model;
+INSTRUCTIONS:
+1. Read the review text carefully
+2. For each attribute, determine if the sentiment is Positive, Negative, or Neutral
+3. Return ONLY a JSON object in this EXACT format:
 
-    public function __construct()
-    {
-        $this->apiUrl = env('LOCAL_AI_API_URL', 'http://10.58.38.218:30011/v1/completions');
-        $this->model = env('LOCAL_AI_MODEL', '/mnt/data/llms/Llama-3.3-70B-Instruct');
-        $this->client = new Client();
-    }
+{\"generic_attributes\":{\"overallSentiment\":\"Positive\",\"customerService\":\"Positive\"},\"category_specific_attributes\":{\"5G network\":\"Positive\",\"loyaltyPrograms\":\"Neutral\"}}
 
-    /**
-     * Sends a request to Local AI API with a given prompt and review.
-     *
-     * @param string $prompt
-     * @param string $reviewText
-     * @return array|null
-     */
-    public function sendRequest($prompt, $reviewText)
-    {
-        // Combine system prompt and user content into a single prompt
-        $combinedPrompt = $prompt . "\n\nReview Text: " . $reviewText;
+IMPORTANT RULES:
+- Use only: Positive, Negative, or Neutral
+- Return ONLY the JSON object
+- No additional text before or after the JSON
+- No explanations or descriptions
+- Do not repeat the JSON
+- Make sure JSON is valid and complete
 
-        $requestBody = [
-            'model' => $this->model,
-            'prompt' => $combinedPrompt,
-            'temperature' => 0.0,
-            'top_p' => 0.95,
-            'max_tokens' => 500,
-        ];
+REVIEW TEXT TO ANALYZE:
 
-        try {
-            Log::info('Sending AI request:', [
-                'url' => $this->apiUrl,
-                'requestBody' => $requestBody
-            ]);
 
-            $response = $this->client->post($this->apiUrl, [
-                'headers' => [
-                    'Content-Type' => 'application/json',
-                ],
-                'json' => $requestBody,
-                'proxy' => [
-                    'http' => null,
-                    'https' => null,
-                ],
-                'timeout' => 300,
-                'connect_timeout' => 30,
-                'verify' => false,
-            ]);
+Review Text: good","temperature":0.0,"top_p":0.95,"max_tokens":500}} 
+[2025-06-23 13:37:53] local.INFO: AI response received: {"statusCode":200,"responseBody":null} 
+[2025-06-23 13:37:53] local.WARNING: No choices[0].text in response: {"responseBody":null} 
+[2025-06-23 13:37:53] local.WARNING: AI returned no content {"reviewId":5923} 
+[2025-06-23 13:37:54] local.INFO: Processing review {"reviewId":5924,"reviewIndex":2,"totalReviews":5,"inputTokens":253} 
+[2025-06-23 13:37:54] local.INFO: Sending AI request: {"url":"http://10.58.38.218:30011/v1/completions","requestBody":{"model":"/mnt/data/llms/Llama-3.3-70B-Instruct","prompt":"Analyze the sentiment of the following review for these specific attributes:
 
-            $responseBody = json_decode($response->getBody()->getContents(), true);
+BRAND: e& UAE
+CATEGORY: Telecom
 
-            Log::info('AI response received:', [
-                'statusCode' => $response->getStatusCode(),
-                'responseBody' => $responseBody
-            ]);
+ATTRIBUTES TO ANALYZE:
+Generic: {\"overallSentiment\":\"\",\"customerService\":\"\",\"appUsability\":\"\",\"pricing\":\"\",\"security\":\"\",\"userExperience\":\"\",\"reliability\":\"\",\"accessibility\":\"\",\"credibility\":\"\",\"responsiveness\":\"\",\"harassmentOrDiscrimination\":\"\",\"whatDidTheCustomerSuggest\":\"\",\"whatProductDidTheCustomerMention\":\"\"}
+Category Specific: {\"5G network\":\"\",\"bill payment options\":\"\",\"internet\\/data speed\":\"\",\"loyaltyPrograms\":\"\",\"network coverage\":\"\",\"Personalization\":\"\"}
 
-            // Extract the text from the response structure
-            if (isset($responseBody['choices'][0]['text'])) {
-                $rawContent = trim($responseBody['choices'][0]['text']);
-                
-                Log::info('Raw AI content:', [
-                    'rawContent' => $rawContent,
-                    'contentLength' => strlen($rawContent)
-                ]);
-                
-                $cleanedContent = $this->extractAndCleanJsonFromResponse($rawContent);
-                
-                Log::info('Cleaned AI content:', [
-                    'cleanedContent' => $cleanedContent
-                ]);
-                
-                return [
-                    'choices' => [
-                        [
-                            'message' => [
-                                'content' => $cleanedContent
-                            ]
-                        ]
-                    ]
-                ];
-            } else {
-                Log::warning('No choices[0].text in response:', [
-                    'responseBody' => $responseBody
-                ]);
-            }
+INSTRUCTIONS:
+1. Read the review text carefully
+2. For each attribute, determine if the sentiment is Positive, Negative, or Neutral
+3. Return ONLY a JSON object in this EXACT format:
 
-            return $responseBody;
-        } catch (\Exception $e) {
-            Log::error('Local AI API Request Failed: ' . $e->getMessage(), [
-                'url' => $this->apiUrl,
-                'requestBody' => $requestBody
-            ]);
-            return null;
-        }
-    }
+{\"generic_attributes\":{\"overallSentiment\":\"Positive\",\"customerService\":\"Positive\"},\"category_specific_attributes\":{\"5G network\":\"Positive\",\"loyaltyPrograms\":\"Neutral\"}}
 
-    /**
-     * Extract and clean JSON from the AI response
-     *
-     * @param string $rawResponse
-     * @return string
-     */
-    private function extractAndCleanJsonFromResponse($rawResponse)
-    {
-        // Log the raw response for debugging
-        Log::info('Raw AI Response:', ['response' => $rawResponse]);
+IMPORTANT RULES:
+- Use only: Positive, Negative, or Neutral
+- Return ONLY the JSON object
+- No additional text before or after the JSON
+- No explanations or descriptions
+- Do not repeat the JSON
+- Make sure JSON is valid and complete
 
-        // Check if the response contains descriptive text instead of JSON
-        if (strpos($rawResponse, '{') === false || strpos($rawResponse, '}') === false) {
-            Log::warning('Response contains no JSON structure, attempting to parse descriptive text');
-            return $this->parseDescriptiveResponse($rawResponse);
-        }
+REVIEW TEXT TO ANALYZE:
 
-        // Find all JSON objects in the response
-        preg_match_all('/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/', $rawResponse, $matches);
-        
-        if (!empty($matches[0])) {
-            // Get the first complete JSON object
-            $jsonString = $matches[0][0];
-            
-            // Validate that it's proper JSON
-            $decoded = json_decode($jsonString, true);
-            if (json_last_error() === JSON_ERROR_NONE) {
-                Log::info('Extracted JSON:', ['json' => $jsonString]);
-                return $jsonString;
-            }
-        }
 
-        // If no valid JSON found, try to extract from lines containing JSON-like content
-        $lines = explode("\n", $rawResponse);
-        foreach ($lines as $line) {
-            $line = trim($line);
-            if (strpos($line, '{') === 0 && strpos($line, '}') !== false) {
-                $decoded = json_decode($line, true);
-                if (json_last_error() === JSON_ERROR_NONE) {
-                    Log::info('Extracted JSON from line:', ['json' => $line]);
-                    return $line;
-                }
-            }
-        }
+Review Text: good","temperature":0.0,"top_p":0.95,"max_tokens":500}} 
+[2025-06-23 13:37:54] local.INFO: AI response received: {"statusCode":200,"responseBody":null} 
+[2025-06-23 13:37:54] local.WARNING: No choices[0].text in response: {"responseBody":null} 
+[2025-06-23 13:37:54] local.WARNING: AI returned no content {"reviewId":5924} 
+[2025-06-23 13:37:55] local.INFO: Processing review {"reviewId":5925,"reviewIndex":3,"totalReviews":5,"inputTokens":255} 
+[2025-06-23 13:37:55] local.INFO: Sending AI request: {"url":"http://10.58.38.218:30011/v1/completions","requestBody":{"model":"/mnt/data/llms/Llama-3.3-70B-Instruct","prompt":"Analyze the sentiment of the following review for these specific attributes:
 
-        // If still no valid JSON, try to parse descriptive response
-        Log::warning('No valid JSON found in response, attempting to parse descriptive text');
-        return $this->parseDescriptiveResponse($rawResponse);
-    }
+BRAND: e& UAE
+CATEGORY: Telecom
 
-    /**
-     * Parse descriptive text response and convert to JSON
-     *
-     * @param string $response
-     * @return string
-     */
-    private function parseDescriptiveResponse($response)
-    {
-        $genericAttributes = [];
-        $categorySpecificAttributes = [];
-        
-        // Define attribute mappings
-        $attributeMap = [
-            // Generic attributes
-            'customer service' => 'customerService',
-            'app usability' => 'appUsability',
-            'pricing' => 'pricing',
-            'security' => 'security',
-            'user experience' => 'userExperience',
-            'reliability' => 'reliability',
-            'accessible' => 'accessibility',
-            'credibility' => 'credibility',
-            'responsive' => 'responsiveness',
-            'harassment' => 'harassmentOrDiscrimination',
-            'discrimination' => 'harassmentOrDiscrimination',
-            'overall' => 'overallSentiment',
-            
-            // Category specific attributes
-            '5g network' => '5G network',
-            'internet speed' => 'internet/data speed',
-            'data speed' => 'internet/data speed',
-            'network coverage' => 'network coverage',
-            'loyalty programs' => 'loyaltyPrograms',
-            'bill payment' => 'bill payment options',
-            'personalization' => 'Personalization'
-        ];
-        
-        // Convert response to lowercase for easier matching
-        $responseLower = strtolower($response);
-        
-        // Look for positive indicators
-        foreach ($attributeMap as $keyword => $attribute) {
-            if (strpos($responseLower, $keyword) !== false) {
-                // Determine sentiment based on context
-                $sentiment = 'Positive'; // Default to positive since the response seems to be listing good things
-                
-                // Check for negative indicators
-                if (strpos($responseLower, "no $keyword") !== false || 
-                    strpos($responseLower, "bad $keyword") !== false ||
-                    strpos($responseLower, "poor $keyword") !== false) {
-                    $sentiment = 'Negative';
-                }
-                
-                // Special case for harassment/discrimination
-                if ($keyword === 'harassment' || $keyword === 'discrimination') {
-                    if (strpos($responseLower, 'no harassment') !== false || 
-                        strpos($responseLower, 'no discrimination') !== false) {
-                        $sentiment = 'Positive'; // No harassment is good
-                    }
-                }
-                
-                // Categorize the attribute
-                if (in_array($attribute, ['customerService', 'appUsability', 'pricing', 'security', 
-                                        'userExperience', 'reliability', 'accessibility', 'credibility', 
-                                        'responsiveness', 'harassmentOrDiscrimination', 'overallSentiment'])) {
-                    $genericAttributes[$attribute] = $sentiment;
-                } else {
-                    $categorySpecificAttributes[$attribute] = $sentiment;
-                }
-            }
-        }
-        
-        // Ensure we have some basic attributes if none were found
-        if (empty($genericAttributes) && empty($categorySpecificAttributes)) {
-            $genericAttributes = [
-                'overallSentiment' => 'Positive',
-                'customerService' => 'Positive',
-                'userExperience' => 'Positive'
-            ];
-        }
-        
-        $result = [
-            'generic_attributes' => $genericAttributes,
-            'category_specific_attributes' => $categorySpecificAttributes
-        ];
-        
-        $jsonResult = json_encode($result);
-        Log::info('Parsed descriptive response to JSON:', ['json' => $jsonResult]);
-        
-        return $jsonResult;
-    }
-}
+ATTRIBUTES TO ANALYZE:
+Generic: {\"overallSentiment\":\"\",\"customerService\":\"\",\"appUsability\":\"\",\"pricing\":\"\",\"security\":\"\",\"userExperience\":\"\",\"reliability\":\"\",\"accessibility\":\"\",\"credibility\":\"\",\"responsiveness\":\"\",\"harassmentOrDiscrimination\":\"\",\"whatDidTheCustomerSuggest\":\"\",\"whatProductDidTheCustomerMention\":\"\"}
+Category Specific: {\"5G network\":\"\",\"bill payment options\":\"\",\"internet\\/data speed\":\"\",\"loyaltyPrograms\":\"\",\"network coverage\":\"\",\"Personalization\":\"\"}
+
+INSTRUCTIONS:
+1. Read the review text carefully
+2. For each attribute, determine if the sentiment is Positive, Negative, or Neutral
+3. Return ONLY a JSON object in this EXACT format:
+
+{\"generic_attributes\":{\"overallSentiment\":\"Positive\",\"customerService\":\"Positive\"},\"category_specific_attributes\":{\"5G network\":\"Positive\",\"loyaltyPrograms\":\"Neutral\"}}
+
+IMPORTANT RULES:
+- Use only: Positive, Negative, or Neutral
+- Return ONLY the JSON object
+- No additional text before or after the JSON
+- No explanations or descriptions
+- Do not repeat the JSON
+- Make sure JSON is valid and complete
+
+REVIEW TEXT TO ANALYZE:
+
+
+Review Text: Really Great!","temperature":0.0,"top_p":0.95,"max_tokens":500}} 
+[2025-06-23 13:37:55] local.INFO: AI response received: {"statusCode":200,"responseBody":null} 
+[2025-06-23 13:37:55] local.WARNING: No choices[0].text in response: {"responseBody":null} 
+[2025-06-23 13:37:55] local.WARNING: AI returned no content {"reviewId":5925} 
+[2025-06-23 13:37:56] local.INFO: Processing review {"reviewId":5926,"reviewIndex":4,"totalReviews":5,"inputTokens":259} 
+[2025-06-23 13:37:56] local.INFO: Sending AI request: {"url":"http://10.58.38.218:30011/v1/completions","requestBody":{"model":"/mnt/data/llms/Llama-3.3-70B-Instruct","prompt":"Analyze the sentiment of the following review for these specific attributes:
+
+BRAND: e& UAE
+CATEGORY: Telecom
+
+ATTRIBUTES TO ANALYZE:
+Generic: {\"overallSentiment\":\"\",\"customerService\":\"\",\"appUsability\":\"\",\"pricing\":\"\",\"security\":\"\",\"userExperience\":\"\",\"reliability\":\"\",\"accessibility\":\"\",\"credibility\":\"\",\"responsiveness\":\"\",\"harassmentOrDiscrimination\":\"\",\"whatDidTheCustomerSuggest\":\"\",\"whatProductDidTheCustomerMention\":\"\"}
+Category Specific: {\"5G network\":\"\",\"bill payment options\":\"\",\"internet\\/data speed\":\"\",\"loyaltyPrograms\":\"\",\"network coverage\":\"\",\"Personalization\":\"\"}
+
+INSTRUCTIONS:
+1. Read the review text carefully
+2. For each attribute, determine if the sentiment is Positive, Negative, or Neutral
+3. Return ONLY a JSON object in this EXACT format:
+
+{\"generic_attributes\":{\"overallSentiment\":\"Positive\",\"customerService\":\"Positive\"},\"category_specific_attributes\":{\"5G network\":\"Positive\",\"loyaltyPrograms\":\"Neutral\"}}
+
+IMPORTANT RULES:
+- Use only: Positive, Negative, or Neutral
+- Return ONLY the JSON object
+- No additional text before or after the JSON
+- No explanations or descriptions
+- Do not repeat the JSON
+- Make sure JSON is valid and complete
+
+REVIEW TEXT TO ANALYZE:
+
+
+Review Text: after new update..not even opening","temperature":0.0,"top_p":0.95,"max_tokens":500}} 
+[2025-06-23 13:37:56] local.INFO: AI response received: {"statusCode":200,"responseBody":null} 
+[2025-06-23 13:37:56] local.WARNING: No choices[0].text in response: {"responseBody":null} 
+[2025-06-23 13:37:56] local.WARNING: AI returned no content {"reviewId":5926} 
+[2025-06-23 13:37:57] local.INFO: Processing review {"reviewId":5927,"reviewIndex":5,"totalReviews":5,"inputTokens":265} 
+[2025-06-23 13:37:57] local.INFO: Sending AI request: {"url":"http://10.58.38.218:30011/v1/completions","requestBody":{"model":"/mnt/data/llms/Llama-3.3-70B-Instruct","prompt":"Analyze the sentiment of the following review for these specific attributes:
+
+BRAND: e& UAE
+CATEGORY: Telecom
+
+ATTRIBUTES TO ANALYZE:
+Generic: {\"overallSentiment\":\"\",\"customerService\":\"\",\"appUsability\":\"\",\"pricing\":\"\",\"security\":\"\",\"userExperience\":\"\",\"reliability\":\"\",\"accessibility\":\"\",\"credibility\":\"\",\"responsiveness\":\"\",\"harassmentOrDiscrimination\":\"\",\"whatDidTheCustomerSuggest\":\"\",\"whatProductDidTheCustomerMention\":\"\"}
+Category Specific: {\"5G network\":\"\",\"bill payment options\":\"\",\"internet\\/data speed\":\"\",\"loyaltyPrograms\":\"\",\"network coverage\":\"\",\"Personalization\":\"\"}
+
+INSTRUCTIONS:
+1. Read the review text carefully
+2. For each attribute, determine if the sentiment is Positive, Negative, or Neutral
+3. Return ONLY a JSON object in this EXACT format:
+
+{\"generic_attributes\":{\"overallSentiment\":\"Positive\",\"customerService\":\"Positive\"},\"category_specific_attributes\":{\"5G network\":\"Positive\",\"loyaltyPrograms\":\"Neutral\"}}
+
+IMPORTANT RULES:
+- Use only: Positive, Negative, or Neutral
+- Return ONLY the JSON object
+- No additional text before or after the JSON
+- No explanations or descriptions
+- Do not repeat the JSON
+- Make sure JSON is valid and complete
+
+REVIEW TEXT TO ANALYZE:
+
+
+Review Text: it's very bad in contacts I cant reach any of the customer services","temperature":0.0,"top_p":0.95,"max_tokens":500}} 
+[2025-06-23 13:37:57] local.INFO: AI response received: {"statusCode":200,"responseBody":null} 
+[2025-06-23 13:37:57] local.WARNING: No choices[0].text in response: {"responseBody":null} 
+[2025-06-23 13:37:57] local.WARNING: AI returned no content {"reviewId":5927} 
+[2025-06-23 13:37:57] local.INFO: Batch processing completed {"totalReviews":5,"processedCount":0,"failedCount":5,"skippedCount":0,"userId":1,"jobId":32} 
+[2025-06-23 13:37:58] local.ERROR: cURL error 60: SSL certificate problem: unable to get local issuer certificate (see https://curl.haxx.se/libcurl/c/libcurl-errors.html) for https://api-mt1.pusher.com/apps/1772075/events?auth_key=e5ef67f74f81ae0ecafb&auth_timestamp=1750685877&auth_version=1.0&body_md5=405dbff43b2eab6139b7699c1667c571&auth_signature=a93bb1eb42fc2dbda6fb2f8f380b896210e7a66755f28e64a26b0eada25037a2 {"exception":"[object] (GuzzleHttp\\Exception\\RequestException(code: 200): cURL error 60: SSL certificate problem: unable to get local issuer certificate (see https://curl.haxx.se/libcurl/c/libcurl-errors.html) for https://api-mt1.pusher.com/apps/1772075/events?auth_key=e5ef67f74f81ae0ecafb&auth_timestamp=1750685877&auth_version=1.0&body_md5=405dbff43b2eab6139b7699c1667c571&auth_signature=a93bb1eb42fc2dbda6fb2f8f380b896210e7a66755f28e64a26b0eada25037a2 at /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Handler/CurlFactory.php:276)
+[stacktrace]
+#0 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Handler/CurlFactory.php(205): GuzzleHttp\\Handler\\CurlFactory::createRejection()
+#1 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Handler/CurlFactory.php(157): GuzzleHttp\\Handler\\CurlFactory::finishError()
+#2 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Handler/CurlHandler.php(47): GuzzleHttp\\Handler\\CurlFactory::finish()
+#3 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Handler/Proxy.php(28): GuzzleHttp\\Handler\\CurlHandler->__invoke()
+#4 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Handler/Proxy.php(48): GuzzleHttp\\Handler\\Proxy::GuzzleHttp\\Handler\\{closure}()
+#5 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/PrepareBodyMiddleware.php(64): GuzzleHttp\\Handler\\Proxy::GuzzleHttp\\Handler\\{closure}()
+#6 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Middleware.php(31): GuzzleHttp\\PrepareBodyMiddleware->__invoke()
+#7 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/RedirectMiddleware.php(71): GuzzleHttp\\Middleware::GuzzleHttp\\{closure}()
+#8 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Middleware.php(63): GuzzleHttp\\RedirectMiddleware->__invoke()
+#9 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/HandlerStack.php(75): GuzzleHttp\\Middleware::GuzzleHttp\\{closure}()
+#10 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Client.php(333): GuzzleHttp\\HandlerStack->__invoke()
+#11 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Client.php(169): GuzzleHttp\\Client->transfer()
+#12 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Client.php(189): GuzzleHttp\\Client->requestAsync()
+#13 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/ClientTrait.php(95): GuzzleHttp\\Client->request()
+#14 /var/www/html/Web-Scrapping-Backend/vendor/pusher/pusher-php-server/src/Pusher.php(776): GuzzleHttp\\Client->post()
+#15 /var/www/html/Web-Scrapping-Backend/vendor/pusher/pusher-php-server/src/Pusher.php(441): Pusher\\Pusher->post()
+#16 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Broadcasting/Broadcasters/PusherBroadcaster.php(161): Pusher\\Pusher->trigger()
+#17 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Collections/Traits/EnumeratesValues.php(259): Illuminate\\Broadcasting\\Broadcasters\\PusherBroadcaster->Illuminate\\Broadcasting\\Broadcasters\\{closure}()
+#18 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Broadcasting/Broadcasters/PusherBroadcaster.php(160): Illuminate\\Support\\Collection->each()
+#19 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Broadcasting/BroadcastEvent.php(92): Illuminate\\Broadcasting\\Broadcasters\\PusherBroadcaster->broadcast()
+#20 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Illuminate\\Broadcasting\\BroadcastEvent->handle()
+#21 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#22 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#23 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#24 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#25 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(126): Illuminate\\Container\\Container->call()
+#26 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Bus\\Dispatcher->Illuminate\\Bus\\{closure}()
+#27 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#28 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(130): Illuminate\\Pipeline\\Pipeline->then()
+#29 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(126): Illuminate\\Bus\\Dispatcher->dispatchNow()
+#30 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Queue\\CallQueuedHandler->Illuminate\\Queue\\{closure}()
+#31 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#32 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(121): Illuminate\\Pipeline\\Pipeline->then()
+#33 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(69): Illuminate\\Queue\\CallQueuedHandler->dispatchThroughMiddleware()
+#34 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Jobs/Job.php(102): Illuminate\\Queue\\CallQueuedHandler->call()
+#35 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(442): Illuminate\\Queue\\Jobs\\Job->fire()
+#36 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(392): Illuminate\\Queue\\Worker->process()
+#37 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(178): Illuminate\\Queue\\Worker->runJob()
+#38 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#39 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#40 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#41 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#42 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#43 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#44 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#45 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(213): Illuminate\\Container\\Container->call()
+#46 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Command/Command.php(279): Illuminate\\Console\\Command->execute()
+#47 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(182): Symfony\\Component\\Console\\Command\\Command->run()
+#48 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(1094): Illuminate\\Console\\Command->run()
+#49 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(342): Symfony\\Component\\Console\\Application->doRunCommand()
+#50 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(193): Symfony\\Component\\Console\\Application->doRun()
+#51 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#52 /var/www/html/Web-Scrapping-Backend/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle()
+#53 {main}
+"} 
