@@ -1,200 +1,276 @@
-    public function singleGoogleReviewAnalysis($review_id, $app_id)
+<?php
+
+namespace App\Jobs;
+
+use App\Events\NewSentimentEvent;
+use App\Http\Controllers\SentimentAssets\SentimentAssetsController;
+use App\Models\GenericAttribute;
+use App\Models\GoogleApp;
+use App\Models\GoogleReview;
+use App\Models\GoogleReviewSentiment;
+use App\Models\User;
+use App\Models\UserJob;
+use App\Notifications\GoogleSentiment;
+use App\Notifications\InsufficientTokensNotification;
+use App\Services\OpenAIConfig;
+use App\Services\OpenAIPrompt;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
+use Yethee\Tiktoken\EncoderProvider;
+
+class ProcessGooglePlayAnalysis implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public $timeout = 3600; // Timeout in seconds
+    protected $requestData;
+    protected $userId;
+    /**
+     * Create a new job instance.
+     */
+    public function __construct($requestData, $userId)
     {
-        $user = User::find(Auth::user()->id);
-
-        // If the user is not found, redirect with error
-        if (!$user) {
-            return redirect("/google_app/{$app_id}")->with('error', 'User not found.');
-        }
-
-        $assets = new SentimentAssetsController();
-
-        // Fetch the review data based on brand_id and review id
-        $result = $assets->fetchReviewData($app_id, $review_id, "google");
-    
-        // If no review data is found, redirect with error
-        if (!$result) {
-            return redirect("/google_app/{$app_id}")->with('error', 'Review data not found.');
-        }
-    
-        // Generate the brand details for the prompt
-        $brandDetails = $assets->generateBrandDetailsArray($result); // Use an array instead of a string for better prompt formatting
-        $openAIPrompt = new OpenAIPrompt();
-        $prompt = $openAIPrompt->sentimentAnalysisPrompt($brandDetails);
-    
-        // Calculate the input tokens to ensure the user has enough tokens
-        $inputTokens = $assets->calculateTokens($prompt, $result->text);
-    
-        // Check if the user has sufficient tokens
-        if ($user->user_token < $inputTokens) {
-            Log::info('Insufficient tokens for user', ['userId' => $user->id]);
-            return redirect("/google_app/{$app_id}")->with('error', 'You have insufficient tokens to complete the sentiment analysis.');
-        }
-    
-        // Initialize OpenAI Config and send request
-        $openAIConfig = new OpenAIConfig();
-        try {
-            // Send the prompt and review text to OpenAI for analysis
-            $response = $openAIConfig->sendRequest($prompt, $result->text);
-    
-            // Check if the response is valid
-            if ($response) {
-                // Process the content returned by OpenAI
-                $assets->processContent($response['choices'][0]['message']['content'], $review_id, $inputTokens, $user, "google");
-            } else {
-                Log::warning('OpenAI returned no content', ['reviewId' => $review_id]);
-            }
-        } catch (\Exception $e) {
-            Log::error('Sentiment analysis processing error', ['error' => $e->getMessage()]);
-        }
-    
-        // Notify the user of the sentiment analysis completion
-        $user->notify(new GoogleSentiment($result->app_name, $app_id));
-    
-        // Redirect to the sentiment display page with success message
-        return redirect("/show-sentiment/{$review_id}")->with('success', 'Your analysis request has finished.');
+        $this->requestData = $requestData;
+        $this->userId = $userId;
     }
 
-###############################################
-###############################################
-###############################################
-
-    public function processContent($content, $reviewId, $inputTokens, $user, $source, $jopID = null)
+    /**
+     * Execute the job.
+     */
+    public function handle(): void
     {
-        // Log the content for debugging
-        Log::info('Processing content:', ['content' => $content, 'reviewId' => $reviewId]);
-        
-        $decodedContent = json_decode($content, true);
-        
-        // Check for JSON decode errors
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            Log::error('JSON decode error:', [
-                'error' => json_last_error_msg(),
-                'content' => $content,
-                'reviewId' => $reviewId
-            ]);
-            return;
-        }
-        
-        // Handle error response
-        if (isset($decodedContent['error'])) {
-            Log::error('AI response contains error:', [
-                'error' => $decodedContent['error'],
-                'reviewId' => $reviewId
-            ]);
-            return;
-        }
-        
-        $genericSentiment = $decodedContent['generic_attributes'] ?? null;
-        $categorySpecificSentiment = $decodedContent['category_specific_attributes'] ?? null;
-    
-        // Validate that we have the required data
-        if (!$genericSentiment || !$categorySpecificSentiment) {
-            Log::warning('Missing sentiment data:', [
-                'genericSentiment' => $genericSentiment ? 'present' : 'missing',
-                'categorySpecificSentiment' => $categorySpecificSentiment ? 'present' : 'missing',
-                'reviewId' => $reviewId
-            ]);
-            return;
-        }
-    
-        // Validate that the arrays are not empty
-        if (empty($genericSentiment) && empty($categorySpecificSentiment)) {
-            Log::warning('Empty sentiment arrays:', ['reviewId' => $reviewId]);
-            return;
-        }
-    
-        $provider = new EncoderProvider();
-        $encoder = $provider->getForModel('gpt-4-turbo');
-        $outputTokens = count($encoder->encode($content));
-    
-        if ($user->user_token < $outputTokens) {
-            Log::info('Insufficient tokens for user', ['userId' => $user->id]);
-            return;
-        }
-    
-        $positiveAttributes = [];
-        $negativeAttributes = [];
-    
-        // Process generic attributes
-        if (is_array($genericSentiment)) {
-            foreach ($genericSentiment as $attribute => $value) {
-                if (is_string($value)) {
-                    $value = strtolower(trim($value));
-                    if ($value === 'positive') {
-                        $positiveAttributes[] = $attribute;
-                    } elseif ($value === 'negative') {
-                        $negativeAttributes[] = $attribute;
-                    }
-                }
-            }
-        }
-    
-        // Process category-specific attributes
-        if (is_array($categorySpecificSentiment)) {
-            foreach ($categorySpecificSentiment as $attribute => $value) {
-                if (is_string($value)) {
-                    $value = strtolower(trim($value));
-                    if ($value === 'positive') {
-                        $positiveAttributes[] = $attribute;
-                    } elseif ($value === 'negative') {
-                        $negativeAttributes[] = $attribute;
-                    }
-                }
-            }
-        }
-    
-        $positiveString = implode(' ', $positiveAttributes);
-        $negativeString = implode(' ', $negativeAttributes);
-    
+        $validatedData = $this->requestData;
+        $user = User::find($this->userId);
+
         try {
-            if ($source == "google") {
-                if (!GoogleReviewSentiment::where('review_id', $reviewId)->exists()) {
-                    GoogleReviewSentiment::create([
-                        'sentiment_generic' => json_encode($genericSentiment),
-                        'sentiment_category_specific' => json_encode($categorySpecificSentiment),
-                        'positive_attributes' => $positiveString,
-                        'negative_attributes' => $negativeString,
-                        'review_id' => $reviewId,
-                    ]);
-                    Log::info('Google sentiment record created:', ['reviewId' => $reviewId]);
-                }
-            } else if ($source == "apple") {
-                if (!AppleReviewSentiment::where('review_id', $reviewId)->exists()) {
-                    AppleReviewSentiment::create([
-                        'sentiment_generic' => json_encode($genericSentiment),
-                        'sentiment_category_specific' => json_encode($categorySpecificSentiment),
-                        'positive_attributes' => $positiveString,
-                        'negative_attributes' => $negativeString,
-                        'review_id' => $reviewId,
-                    ]);
-                    Log::info('Apple sentiment record created:', ['reviewId' => $reviewId]);
-                }
+
+            // Save job details in `user_jobs`
+            $job = new UserJob([
+                'job_id'        => $this->job->getJobId(),
+                'status'        => 'processing', // or any initial status
+                'request_type'  => 'sentiment',
+                'request_count' => $validatedData['number_of_reviews'],
+                'completed_count' => 0, // set to 0 at the start
+                'user_id' => $user->id
+            ]);
+
+            // Assuming this is associated with a GoogleApp
+            $googleApp = GoogleApp::find($validatedData['appId']);
+            $googleApp->jobs()->save($job); // Saving polymorphic relation
+            $jobId = $job->id;
+
+            if (!$user) {
+                Log::error('User not found', ['userId' => $this->userId]);
+                return;
             }
-    
-            if ($jopID !== null) {
-                $userJob = UserJob::find($jopID);
-                if ($userJob) {
-                    $userJob->increment('completed_count');
-                    Log::info('Job count incremented:', ['jobId' => $jopID]);
-                }
-            }
-    
-            // Deduct tokens from user
-            $user->user_token -= ($inputTokens + $outputTokens);
-            $user->save();
+            $assets = new SentimentAssetsController();
+
+            $reviews = $assets->fetchReviews($validatedData['appId'], $validatedData['number_of_reviews'], "google");
             
-            Log::info('Sentiment processing completed successfully:', [
-                'reviewId' => $reviewId,
-                'tokensDeducted' => $inputTokens + $outputTokens,
-                'remainingTokens' => $user->user_token
+            $brandDetails = $assets->getBrandDetails($validatedData['appId'], "google");
+
+            if (empty($brandDetails)) {
+                Log::error('App details not found', ['appId' => $validatedData['appId']]);
+                return;
+            }
+
+            $openAIPrompt = new OpenAIPrompt();
+            $prompt = $openAIPrompt->sentimentAnalysisPrompt($brandDetails);
+
+            $encoder = (new EncoderProvider())->getForModel('gpt-4o');
+
+            $assets->processMultipleReviews($encoder, $user, $reviews, $prompt, $brandDetails['brandId'], "google", $jobId);
+
+            // Update job details after processing
+            $job->update([
+                'status' => 'completed',  // Update the status to completed
             ]);
             
+
+            if ($user->user_token > 0) {
+                $user->notify(new GoogleSentiment ($brandDetails['brandName'], $brandDetails['brandId']));
+            }
+
+            broadcast(new NewSentimentEvent());
+
         } catch (\Exception $e) {
-            Log::error('Error saving sentiment data:', [
+            Log::error("Job failed: {$e->getMessage()}", [
+                'userId' => $this->userId,
+                'appId' => $validatedData['appId'] ?? null,
+                'exception' => $e,
+            ]);
+    
+            $job = UserJob::where('job_id', $this->job->getJobId())->first();
+            if ($job) {
+                $job->update([
+                    'status' => 'failed',
+                ]);
+            }
+
+            throw $e;
+        }
+
+    }
+
+
+
+
+
+}
+
+#############################################
+#############################################
+#############################################
+
+
+public function processMultipleReviews($encoder, $user, $reviews, $prompt, $appId, $source, $jopID)
+{
+    $openAIConfig = new OpenAIConfig();
+    $processedCount = 0;
+    $failedCount = 0;
+    $skippedCount = 0;
+
+    Log::info('Starting batch processing', [
+        'totalReviews' => count($reviews),
+        'userId' => $user->id,
+        'appId' => $appId,
+        'jobId' => $jopID
+    ]);
+
+    // Loop through each review
+    foreach ($reviews as $index => $review) {
+        try {
+            // Add a small delay between requests to prevent overwhelming the AI service
+            if ($index > 0) {
+                sleep(1); // 1 second delay between requests
+            }
+
+            // Check if this review was already processed
+            if ($source == "google" && GoogleReviewSentiment::where('review_id', $review->id)->exists()) {
+                Log::info('Review already processed, skipping', ['reviewId' => $review->id]);
+                $skippedCount++;
+                
+                // Still increment the job counter
+                if ($jopID !== null) {
+                    $userJob = UserJob::find($jopID);
+                    if ($userJob) {
+                        $userJob->increment('completed_count');
+                    }
+                }
+                continue;
+            }
+
+            // Check for Apple reviews if source is apple
+            if ($source == "apple" && AppleReviewSentiment::where('review_id', $review->id)->exists()) {
+                Log::info('Review already processed, skipping', ['reviewId' => $review->id]);
+                $skippedCount++;
+                
+                // Still increment the job counter
+                if ($jopID !== null) {
+                    $userJob = UserJob::find($jopID);
+                    if ($userJob) {
+                        $userJob->increment('completed_count');
+                    }
+                }
+                continue;
+            }
+
+            // Refresh user data to get latest token count
+            $user->refresh();
+
+            // Token calculations
+            $systemMessageTokens = count($encoder->encode($prompt));
+            $userMessageTokens = count($encoder->encode($review->text));
+            $inputTokens = $systemMessageTokens + $userMessageTokens;
+
+            // Check if the user has enough tokens
+            if ($user->user_token < $inputTokens) {
+                Log::warning('Insufficient tokens for user', [
+                    'userId' => $user->id, 
+                    'reviewId' => $review->id,
+                    'requiredTokens' => $inputTokens,
+                    'availableTokens' => $user->user_token
+                ]);
+                
+                // Send notification only once, not for every review
+                if ($processedCount == 0 && $skippedCount == 0) {
+                    $user->notify(new InsufficientTokensNotification($appId));
+                }
+                break; // Stop processing if insufficient tokens
+            }
+
+            Log::info('Processing review', [
+                'reviewId' => $review->id,
+                'reviewIndex' => $index + 1,
+                'totalReviews' => count($reviews),
+                'inputTokens' => $inputTokens
+            ]);
+
+            // Use the EXACT same method as your working single review
+            try {
+                // Send the prompt and review text to AI for analysis (exactly like single review)
+                $response = $openAIConfig->sendRequest($prompt, $review->text);
+        
+                // Check if the response is valid (exactly like single review)
+                if ($response) {
+                    // Process the content returned by AI (exactly like single review)
+                    $this->processContent($response['choices'][0]['message']['content'], $review->id, $inputTokens, $user, $source, $jopID);
+                    $processedCount++;
+                    
+                    Log::info('Review processed successfully', [
+                        'reviewId' => $review->id,
+                        'processedCount' => $processedCount
+                    ]);
+                } else {
+                    Log::warning('AI returned no content', ['reviewId' => $review->id]);
+                    $failedCount++;
+                }
+            } catch (\Exception $e) {
+                Log::error('Sentiment analysis processing error', ['error' => $e->getMessage(), 'reviewId' => $review->id]);
+                $failedCount++;
+            }
+
+        } catch (\Exception $e) {
+            Log::error('Error processing review', [
                 'error' => $e->getMessage(),
-                'reviewId' => $reviewId,
+                'reviewId' => $review->id,
                 'trace' => $e->getTraceAsString()
             ]);
+            $failedCount++;
+
+            // If too many failures, stop processing
+            if ($failedCount > 5) {
+                Log::error('Too many failures, stopping batch processing', [
+                    'failedCount' => $failedCount,
+                    'processedCount' => $processedCount
+                ]);
+                break;
+            }
         }
     }
+
+    Log::info('Batch processing completed', [
+        'totalReviews' => count($reviews),
+        'processedCount' => $processedCount,
+        'failedCount' => $failedCount,
+        'skippedCount' => $skippedCount,
+        'userId' => $user->id,
+        'jobId' => $jopID
+    ]);
+
+    return [
+        'processed' => $processedCount,
+        'failed' => $failedCount,
+        'skipped' => $skippedCount,
+        'total' => count($reviews)
+    ];
+}
+
+
+
