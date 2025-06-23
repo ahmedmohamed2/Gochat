@@ -1,106 +1,200 @@
-[root@DX00133 ~]# php /var/www/html/Web-Scrapping-Backend/test_ai_api.php
-Testing AI API...
-URL: http://10.58.38.218:30011/v1/completions
-Request Body: {
-    "model": "\/mnt\/data\/llms\/Llama-3.3-70B-Instruct",
-    "prompt": "Analyze the sentiment. Return JSON only: {\"generic_attributes\":{\"overallSentiment\":\"Positive\"},\"category_specific_attributes\":{}}\n\nReview: This app is great and easy to use.",
-    "temperature": 0,
-    "top_p": 0.95,
-    "max_tokens": 500
-}
+    public function singleGoogleReviewAnalysis($review_id, $app_id)
+    {
+        $user = User::find(Auth::user()->id);
 
-Status Code: 200
-Headers: {
-    "Content-Length": [
-        "2863"
-    ],
-    "Content-Type": [
-        "text\/html; charset=UTF-8"
-    ],
-    "Date": [
-        "Mon, 23 Jun 2025 12:40:50 GMT"
-    ],
-    "Age": [
-        "0"
-    ],
-    "Proxy-Connection": [
-        "keep-alive"
-    ],
-    "Via": [
-        "1.0 itsecprxy.etisalat.corp.ae"
-    ]
-}
-Raw Response Body: <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+        // If the user is not found, redirect with error
+        if (!$user) {
+            return redirect("/google_app/{$app_id}")->with('error', 'User not found.');
+        }
 
-<!--//////////////////////////////////////////////////////////////////////////
-//
-//   Copyright (c) 2022 Forcepoint. Forcepoint and the FORCEPOINT logo are
-//   trademarks of Forcepoint. All other trademarks used in this document
-//   are the property of their respective owner.
-//
-///////////////////////////////////////////////////////////////////////////-->
+        $assets = new SentimentAssetsController();
 
-<html>
-<head>
-<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-<title>Access to this site is blocked</title>
-<link rel="stylesheet" href="/en/Default/master.css" type="text/css">
-<script type="text/javascript" language="javascript" src="/en/Default/master.js"></script>
-<script type="text/javascript" language="javascript" src="/en/Default/base64.js"></script>
-<script type="text/javascript" language="javascript" src="/en/Default/security.js"></script>
-</head>
-<body>
-        <noscript>
-                <style>
-                        iframe.top {
-                                height: 15em;
-                        }
-                        iframe.bottom {
-                                height: 17.5em;
-                        }
-                </style>
-        </noscript>
+        // Fetch the review data based on brand_id and review id
+        $result = $assets->fetchReviewData($app_id, $review_id, "google");
+    
+        // If no review data is found, redirect with error
+        if (!$result) {
+            return redirect("/google_app/{$app_id}")->with('error', 'Review data not found.');
+        }
+    
+        // Generate the brand details for the prompt
+        $brandDetails = $assets->generateBrandDetailsArray($result); // Use an array instead of a string for better prompt formatting
+        $openAIPrompt = new OpenAIPrompt();
+        $prompt = $openAIPrompt->sentimentAnalysisPrompt($brandDetails);
+    
+        // Calculate the input tokens to ensure the user has enough tokens
+        $inputTokens = $assets->calculateTokens($prompt, $result->text);
+    
+        // Check if the user has sufficient tokens
+        if ($user->user_token < $inputTokens) {
+            Log::info('Insufficient tokens for user', ['userId' => $user->id]);
+            return redirect("/google_app/{$app_id}")->with('error', 'You have insufficient tokens to complete the sentiment analysis.');
+        }
+    
+        // Initialize OpenAI Config and send request
+        $openAIConfig = new OpenAIConfig();
+        try {
+            // Send the prompt and review text to OpenAI for analysis
+            $response = $openAIConfig->sendRequest($prompt, $result->text);
+    
+            // Check if the response is valid
+            if ($response) {
+                // Process the content returned by OpenAI
+                $assets->processContent($response['choices'][0]['message']['content'], $review_id, $inputTokens, $user, "google");
+            } else {
+                Log::warning('OpenAI returned no content', ['reviewId' => $review_id]);
+            }
+        } catch (\Exception $e) {
+            Log::error('Sentiment analysis processing error', ['error' => $e->getMessage()]);
+        }
+    
+        // Notify the user of the sentiment analysis completion
+        $user->notify(new GoogleSentiment($result->app_name, $app_id));
+    
+        // Redirect to the sentiment display page with success message
+        return redirect("/show-sentiment/{$review_id}")->with('success', 'Your analysis request has finished.');
+    }
 
-        <div class="custom-image">
-                <div class="master-frame">
-                        <iframe onload="resizeIframe(this);" class="top" src="http://10.117.177.38:15871/cgi-bin/block_message.cgi?ws-session=-1820628825" name="ws_block" frameborder="0" scrolling="auto" style="width: 100%;padding-bottom: 15px;min-height: 25em;vertical-align: middle;">
-                        </iframe>
+###############################################
+###############################################
+###############################################
 
-                </div>
-        </div>
-        <div id="fade" class="black_overlay">
-                <div id="light" class="white_content">
-                        <div id="titlebar" class="header">Switch Credentials</div>
-                        <form action="/cgi-bin/useraccount_overrider.cgi" method="POST" target="_top" name="UAOverrideForm" onsubmit="encode();">
-                                <input type="HIDDEN" name="ws-session" value="-1820628825">
-                                <input type="HIDDEN" id="ws-credentials" name="ws-credentials" value="">
-                                <div style="padding:10px 16px">
-                                        <p id="reauth-text">
-                                                Enter your user name and password to attempt to access this site.
-                                        </p>
-                                        <p id="reauth-text-timeout">
-                                                If access is permitted, the new policy will be applied to Internet requests for  minutes.
-                                        </p>
-                                        <p>
-                                                <label for="ws-credentials-user">User name: </label>
-                                                <input type="text" id="ws-credentials-user" name="ws-credentials-user" size="55" maxlength="65">
-                                        </p>
-                                        <p>
-                                                <label for="ws-credentials-pass">Password: </label>
-                                                <input type="password" id="ws-credentials-pass" name="ws-credentials-pass" size="55" maxlength="65">
-                                        </p>
-                                        <div style="float:right">
-                                                <input TYPE="SUBMIT" VALUE="Switch Credentials" name="ws-credentials-button">
-                                                <input TYPE="SUBMIT" VALUE="Cancel"  name="ws-credentials-cancel-button" onclick="return closePopup();">
-                                        </div>
-                                </div>
-                        </form>
-                </div>
-        </div>
-</body>
-</html>
-
-
-Decoded Response: null
-ERROR: No 'choices[0].text' found in response
-[root@DX00133 ~]#
+    public function processContent($content, $reviewId, $inputTokens, $user, $source, $jopID = null)
+    {
+        // Log the content for debugging
+        Log::info('Processing content:', ['content' => $content, 'reviewId' => $reviewId]);
+        
+        $decodedContent = json_decode($content, true);
+        
+        // Check for JSON decode errors
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Log::error('JSON decode error:', [
+                'error' => json_last_error_msg(),
+                'content' => $content,
+                'reviewId' => $reviewId
+            ]);
+            return;
+        }
+        
+        // Handle error response
+        if (isset($decodedContent['error'])) {
+            Log::error('AI response contains error:', [
+                'error' => $decodedContent['error'],
+                'reviewId' => $reviewId
+            ]);
+            return;
+        }
+        
+        $genericSentiment = $decodedContent['generic_attributes'] ?? null;
+        $categorySpecificSentiment = $decodedContent['category_specific_attributes'] ?? null;
+    
+        // Validate that we have the required data
+        if (!$genericSentiment || !$categorySpecificSentiment) {
+            Log::warning('Missing sentiment data:', [
+                'genericSentiment' => $genericSentiment ? 'present' : 'missing',
+                'categorySpecificSentiment' => $categorySpecificSentiment ? 'present' : 'missing',
+                'reviewId' => $reviewId
+            ]);
+            return;
+        }
+    
+        // Validate that the arrays are not empty
+        if (empty($genericSentiment) && empty($categorySpecificSentiment)) {
+            Log::warning('Empty sentiment arrays:', ['reviewId' => $reviewId]);
+            return;
+        }
+    
+        $provider = new EncoderProvider();
+        $encoder = $provider->getForModel('gpt-4-turbo');
+        $outputTokens = count($encoder->encode($content));
+    
+        if ($user->user_token < $outputTokens) {
+            Log::info('Insufficient tokens for user', ['userId' => $user->id]);
+            return;
+        }
+    
+        $positiveAttributes = [];
+        $negativeAttributes = [];
+    
+        // Process generic attributes
+        if (is_array($genericSentiment)) {
+            foreach ($genericSentiment as $attribute => $value) {
+                if (is_string($value)) {
+                    $value = strtolower(trim($value));
+                    if ($value === 'positive') {
+                        $positiveAttributes[] = $attribute;
+                    } elseif ($value === 'negative') {
+                        $negativeAttributes[] = $attribute;
+                    }
+                }
+            }
+        }
+    
+        // Process category-specific attributes
+        if (is_array($categorySpecificSentiment)) {
+            foreach ($categorySpecificSentiment as $attribute => $value) {
+                if (is_string($value)) {
+                    $value = strtolower(trim($value));
+                    if ($value === 'positive') {
+                        $positiveAttributes[] = $attribute;
+                    } elseif ($value === 'negative') {
+                        $negativeAttributes[] = $attribute;
+                    }
+                }
+            }
+        }
+    
+        $positiveString = implode(' ', $positiveAttributes);
+        $negativeString = implode(' ', $negativeAttributes);
+    
+        try {
+            if ($source == "google") {
+                if (!GoogleReviewSentiment::where('review_id', $reviewId)->exists()) {
+                    GoogleReviewSentiment::create([
+                        'sentiment_generic' => json_encode($genericSentiment),
+                        'sentiment_category_specific' => json_encode($categorySpecificSentiment),
+                        'positive_attributes' => $positiveString,
+                        'negative_attributes' => $negativeString,
+                        'review_id' => $reviewId,
+                    ]);
+                    Log::info('Google sentiment record created:', ['reviewId' => $reviewId]);
+                }
+            } else if ($source == "apple") {
+                if (!AppleReviewSentiment::where('review_id', $reviewId)->exists()) {
+                    AppleReviewSentiment::create([
+                        'sentiment_generic' => json_encode($genericSentiment),
+                        'sentiment_category_specific' => json_encode($categorySpecificSentiment),
+                        'positive_attributes' => $positiveString,
+                        'negative_attributes' => $negativeString,
+                        'review_id' => $reviewId,
+                    ]);
+                    Log::info('Apple sentiment record created:', ['reviewId' => $reviewId]);
+                }
+            }
+    
+            if ($jopID !== null) {
+                $userJob = UserJob::find($jopID);
+                if ($userJob) {
+                    $userJob->increment('completed_count');
+                    Log::info('Job count incremented:', ['jobId' => $jopID]);
+                }
+            }
+    
+            // Deduct tokens from user
+            $user->user_token -= ($inputTokens + $outputTokens);
+            $user->save();
+            
+            Log::info('Sentiment processing completed successfully:', [
+                'reviewId' => $reviewId,
+                'tokensDeducted' => $inputTokens + $outputTokens,
+                'remainingTokens' => $user->user_token
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Error saving sentiment data:', [
+                'error' => $e->getMessage(),
+                'reviewId' => $reviewId,
+                'trace' => $e->getTraceAsString()
+            ]);
+        }
+    }
