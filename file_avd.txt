@@ -1,276 +1,69 @@
-<?php
-
-namespace App\Jobs;
-
-use App\Events\NewSentimentEvent;
-use App\Http\Controllers\SentimentAssets\SentimentAssetsController;
-use App\Models\GenericAttribute;
-use App\Models\GoogleApp;
-use App\Models\GoogleReview;
-use App\Models\GoogleReviewSentiment;
-use App\Models\User;
-use App\Models\UserJob;
-use App\Notifications\GoogleSentiment;
-use App\Notifications\InsufficientTokensNotification;
-use App\Services\OpenAIConfig;
-use App\Services\OpenAIPrompt;
-use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldBeUnique;
-use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Foundation\Bus\Dispatchable;
-use Illuminate\Queue\InteractsWithQueue;
-use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Log;
-use Yethee\Tiktoken\EncoderProvider;
-
-class ProcessGooglePlayAnalysis implements ShouldQueue
-{
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
-
-    public $timeout = 3600; // Timeout in seconds
-    protected $requestData;
-    protected $userId;
-    /**
-     * Create a new job instance.
-     */
-    public function __construct($requestData, $userId)
-    {
-        $this->requestData = $requestData;
-        $this->userId = $userId;
-    }
-
-    /**
-     * Execute the job.
-     */
-    public function handle(): void
-    {
-        $validatedData = $this->requestData;
-        $user = User::find($this->userId);
-
-        try {
-
-            // Save job details in `user_jobs`
-            $job = new UserJob([
-                'job_id'        => $this->job->getJobId(),
-                'status'        => 'processing', // or any initial status
-                'request_type'  => 'sentiment',
-                'request_count' => $validatedData['number_of_reviews'],
-                'completed_count' => 0, // set to 0 at the start
-                'user_id' => $user->id
-            ]);
-
-            // Assuming this is associated with a GoogleApp
-            $googleApp = GoogleApp::find($validatedData['appId']);
-            $googleApp->jobs()->save($job); // Saving polymorphic relation
-            $jobId = $job->id;
-
-            if (!$user) {
-                Log::error('User not found', ['userId' => $this->userId]);
-                return;
-            }
-            $assets = new SentimentAssetsController();
-
-            $reviews = $assets->fetchReviews($validatedData['appId'], $validatedData['number_of_reviews'], "google");
-            
-            $brandDetails = $assets->getBrandDetails($validatedData['appId'], "google");
-
-            if (empty($brandDetails)) {
-                Log::error('App details not found', ['appId' => $validatedData['appId']]);
-                return;
-            }
-
-            $openAIPrompt = new OpenAIPrompt();
-            $prompt = $openAIPrompt->sentimentAnalysisPrompt($brandDetails);
-
-            $encoder = (new EncoderProvider())->getForModel('gpt-4o');
-
-            $assets->processMultipleReviews($encoder, $user, $reviews, $prompt, $brandDetails['brandId'], "google", $jobId);
-
-            // Update job details after processing
-            $job->update([
-                'status' => 'completed',  // Update the status to completed
-            ]);
-            
-
-            if ($user->user_token > 0) {
-                $user->notify(new GoogleSentiment ($brandDetails['brandName'], $brandDetails['brandId']));
-            }
-
-            broadcast(new NewSentimentEvent());
-
-        } catch (\Exception $e) {
-            Log::error("Job failed: {$e->getMessage()}", [
-                'userId' => $this->userId,
-                'appId' => $validatedData['appId'] ?? null,
-                'exception' => $e,
-            ]);
-    
-            $job = UserJob::where('job_id', $this->job->getJobId())->first();
-            if ($job) {
-                $job->update([
-                    'status' => 'failed',
-                ]);
-            }
-
-            throw $e;
-        }
-
-    }
-
-
-
-
-
-}
-
-#############################################
-#############################################
-#############################################
-
-
-public function processMultipleReviews($encoder, $user, $reviews, $prompt, $appId, $source, $jopID)
-{
-    $openAIConfig = new OpenAIConfig();
-    $processedCount = 0;
-    $failedCount = 0;
-    $skippedCount = 0;
-
-    Log::info('Starting batch processing', [
-        'totalReviews' => count($reviews),
-        'userId' => $user->id,
-        'appId' => $appId,
-        'jobId' => $jopID
-    ]);
-
-    // Loop through each review
-    foreach ($reviews as $index => $review) {
-        try {
-            // Add a small delay between requests to prevent overwhelming the AI service
-            if ($index > 0) {
-                sleep(1); // 1 second delay between requests
-            }
-
-            // Check if this review was already processed
-            if ($source == "google" && GoogleReviewSentiment::where('review_id', $review->id)->exists()) {
-                Log::info('Review already processed, skipping', ['reviewId' => $review->id]);
-                $skippedCount++;
-                
-                // Still increment the job counter
-                if ($jopID !== null) {
-                    $userJob = UserJob::find($jopID);
-                    if ($userJob) {
-                        $userJob->increment('completed_count');
-                    }
-                }
-                continue;
-            }
-
-            // Check for Apple reviews if source is apple
-            if ($source == "apple" && AppleReviewSentiment::where('review_id', $review->id)->exists()) {
-                Log::info('Review already processed, skipping', ['reviewId' => $review->id]);
-                $skippedCount++;
-                
-                // Still increment the job counter
-                if ($jopID !== null) {
-                    $userJob = UserJob::find($jopID);
-                    if ($userJob) {
-                        $userJob->increment('completed_count');
-                    }
-                }
-                continue;
-            }
-
-            // Refresh user data to get latest token count
-            $user->refresh();
-
-            // Token calculations
-            $systemMessageTokens = count($encoder->encode($prompt));
-            $userMessageTokens = count($encoder->encode($review->text));
-            $inputTokens = $systemMessageTokens + $userMessageTokens;
-
-            // Check if the user has enough tokens
-            if ($user->user_token < $inputTokens) {
-                Log::warning('Insufficient tokens for user', [
-                    'userId' => $user->id, 
-                    'reviewId' => $review->id,
-                    'requiredTokens' => $inputTokens,
-                    'availableTokens' => $user->user_token
-                ]);
-                
-                // Send notification only once, not for every review
-                if ($processedCount == 0 && $skippedCount == 0) {
-                    $user->notify(new InsufficientTokensNotification($appId));
-                }
-                break; // Stop processing if insufficient tokens
-            }
-
-            Log::info('Processing review', [
-                'reviewId' => $review->id,
-                'reviewIndex' => $index + 1,
-                'totalReviews' => count($reviews),
-                'inputTokens' => $inputTokens
-            ]);
-
-            // Use the EXACT same method as your working single review
-            try {
-                // Send the prompt and review text to AI for analysis (exactly like single review)
-                $response = $openAIConfig->sendRequest($prompt, $review->text);
-        
-                // Check if the response is valid (exactly like single review)
-                if ($response) {
-                    // Process the content returned by AI (exactly like single review)
-                    $this->processContent($response['choices'][0]['message']['content'], $review->id, $inputTokens, $user, $source, $jopID);
-                    $processedCount++;
-                    
-                    Log::info('Review processed successfully', [
-                        'reviewId' => $review->id,
-                        'processedCount' => $processedCount
-                    ]);
-                } else {
-                    Log::warning('AI returned no content', ['reviewId' => $review->id]);
-                    $failedCount++;
-                }
-            } catch (\Exception $e) {
-                Log::error('Sentiment analysis processing error', ['error' => $e->getMessage(), 'reviewId' => $review->id]);
-                $failedCount++;
-            }
-
-        } catch (\Exception $e) {
-            Log::error('Error processing review', [
-                'error' => $e->getMessage(),
-                'reviewId' => $review->id,
-                'trace' => $e->getTraceAsString()
-            ]);
-            $failedCount++;
-
-            // If too many failures, stop processing
-            if ($failedCount > 5) {
-                Log::error('Too many failures, stopping batch processing', [
-                    'failedCount' => $failedCount,
-                    'processedCount' => $processedCount
-                ]);
-                break;
-            }
-        }
-    }
-
-    Log::info('Batch processing completed', [
-        'totalReviews' => count($reviews),
-        'processedCount' => $processedCount,
-        'failedCount' => $failedCount,
-        'skippedCount' => $skippedCount,
-        'userId' => $user->id,
-        'jobId' => $jopID
-    ]);
-
-    return [
-        'processed' => $processedCount,
-        'failed' => $failedCount,
-        'skipped' => $skippedCount,
-        'total' => count($reviews)
-    ];
-}
-
-
-
+[2025-06-23 13:23:00] local.INFO: Starting batch processing {"totalReviews":5,"userId":1,"appId":1,"jobId":31} 
+[2025-06-23 13:23:00] local.INFO: Processing review {"reviewId":5923,"reviewIndex":1,"totalReviews":5,"inputTokens":253} 
+[2025-06-23 13:23:00] local.WARNING: AI returned no content {"reviewId":5923} 
+[2025-06-23 13:23:01] local.INFO: Processing review {"reviewId":5924,"reviewIndex":2,"totalReviews":5,"inputTokens":253} 
+[2025-06-23 13:23:02] local.WARNING: AI returned no content {"reviewId":5924} 
+[2025-06-23 13:23:03] local.INFO: Processing review {"reviewId":5925,"reviewIndex":3,"totalReviews":5,"inputTokens":255} 
+[2025-06-23 13:23:03] local.WARNING: AI returned no content {"reviewId":5925} 
+[2025-06-23 13:23:04] local.INFO: Processing review {"reviewId":5926,"reviewIndex":4,"totalReviews":5,"inputTokens":259} 
+[2025-06-23 13:23:04] local.WARNING: AI returned no content {"reviewId":5926} 
+[2025-06-23 13:23:05] local.INFO: Processing review {"reviewId":5927,"reviewIndex":5,"totalReviews":5,"inputTokens":265} 
+[2025-06-23 13:23:05] local.WARNING: AI returned no content {"reviewId":5927} 
+[2025-06-23 13:23:05] local.INFO: Batch processing completed {"totalReviews":5,"processedCount":0,"failedCount":5,"skippedCount":0,"userId":1,"jobId":31} 
+[2025-06-23 13:23:06] local.ERROR: cURL error 60: SSL certificate problem: unable to get local issuer certificate (see https://curl.haxx.se/libcurl/c/libcurl-errors.html) for https://api-mt1.pusher.com/apps/1772075/events?auth_key=e5ef67f74f81ae0ecafb&auth_timestamp=1750684985&auth_version=1.0&body_md5=405dbff43b2eab6139b7699c1667c571&auth_signature=255593311b3c6819748af40dea51828d7bfc63a060d544d9e77f564dc85c2269 {"exception":"[object] (GuzzleHttp\\Exception\\RequestException(code: 200): cURL error 60: SSL certificate problem: unable to get local issuer certificate (see https://curl.haxx.se/libcurl/c/libcurl-errors.html) for https://api-mt1.pusher.com/apps/1772075/events?auth_key=e5ef67f74f81ae0ecafb&auth_timestamp=1750684985&auth_version=1.0&body_md5=405dbff43b2eab6139b7699c1667c571&auth_signature=255593311b3c6819748af40dea51828d7bfc63a060d544d9e77f564dc85c2269 at /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Handler/CurlFactory.php:276)
+[stacktrace]
+#0 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Handler/CurlFactory.php(205): GuzzleHttp\\Handler\\CurlFactory::createRejection()
+#1 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Handler/CurlFactory.php(157): GuzzleHttp\\Handler\\CurlFactory::finishError()
+#2 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Handler/CurlHandler.php(47): GuzzleHttp\\Handler\\CurlFactory::finish()
+#3 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Handler/Proxy.php(28): GuzzleHttp\\Handler\\CurlHandler->__invoke()
+#4 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Handler/Proxy.php(48): GuzzleHttp\\Handler\\Proxy::GuzzleHttp\\Handler\\{closure}()
+#5 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/PrepareBodyMiddleware.php(64): GuzzleHttp\\Handler\\Proxy::GuzzleHttp\\Handler\\{closure}()
+#6 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Middleware.php(31): GuzzleHttp\\PrepareBodyMiddleware->__invoke()
+#7 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/RedirectMiddleware.php(71): GuzzleHttp\\Middleware::GuzzleHttp\\{closure}()
+#8 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Middleware.php(63): GuzzleHttp\\RedirectMiddleware->__invoke()
+#9 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/HandlerStack.php(75): GuzzleHttp\\Middleware::GuzzleHttp\\{closure}()
+#10 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Client.php(333): GuzzleHttp\\HandlerStack->__invoke()
+#11 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Client.php(169): GuzzleHttp\\Client->transfer()
+#12 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Client.php(189): GuzzleHttp\\Client->requestAsync()
+#13 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/ClientTrait.php(95): GuzzleHttp\\Client->request()
+#14 /var/www/html/Web-Scrapping-Backend/vendor/pusher/pusher-php-server/src/Pusher.php(776): GuzzleHttp\\Client->post()
+#15 /var/www/html/Web-Scrapping-Backend/vendor/pusher/pusher-php-server/src/Pusher.php(441): Pusher\\Pusher->post()
+#16 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Broadcasting/Broadcasters/PusherBroadcaster.php(161): Pusher\\Pusher->trigger()
+#17 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Collections/Traits/EnumeratesValues.php(259): Illuminate\\Broadcasting\\Broadcasters\\PusherBroadcaster->Illuminate\\Broadcasting\\Broadcasters\\{closure}()
+#18 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Broadcasting/Broadcasters/PusherBroadcaster.php(160): Illuminate\\Support\\Collection->each()
+#19 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Broadcasting/BroadcastEvent.php(92): Illuminate\\Broadcasting\\Broadcasters\\PusherBroadcaster->broadcast()
+#20 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Illuminate\\Broadcasting\\BroadcastEvent->handle()
+#21 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#22 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#23 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#24 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#25 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(126): Illuminate\\Container\\Container->call()
+#26 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Bus\\Dispatcher->Illuminate\\Bus\\{closure}()
+#27 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#28 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(130): Illuminate\\Pipeline\\Pipeline->then()
+#29 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(126): Illuminate\\Bus\\Dispatcher->dispatchNow()
+#30 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Queue\\CallQueuedHandler->Illuminate\\Queue\\{closure}()
+#31 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#32 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(121): Illuminate\\Pipeline\\Pipeline->then()
+#33 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(69): Illuminate\\Queue\\CallQueuedHandler->dispatchThroughMiddleware()
+#34 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Jobs/Job.php(102): Illuminate\\Queue\\CallQueuedHandler->call()
+#35 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(442): Illuminate\\Queue\\Jobs\\Job->fire()
+#36 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(392): Illuminate\\Queue\\Worker->process()
+#37 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(178): Illuminate\\Queue\\Worker->runJob()
+#38 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#39 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#40 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#41 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#42 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#43 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#44 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#45 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(213): Illuminate\\Container\\Container->call()
+#46 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Command/Command.php(279): Illuminate\\Console\\Command->execute()
+#47 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(182): Symfony\\Component\\Console\\Command\\Command->run()
+#48 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(1094): Illuminate\\Console\\Command->run()
+#49 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(342): Symfony\\Component\\Console\\Application->doRunCommand()
+#50 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(193): Symfony\\Component\\Console\\Application->doRun()
+#51 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#52 /var/www/html/Web-Scrapping-Backend/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle()
+#53 {main}
+"} 
