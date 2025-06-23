@@ -1,3 +1,5 @@
+sudo chown nginx:nginx /var/www/html/Web-Scrapping-Backend/public/test-simple-db.php
+
 <?php
 
 require_once 'vendor/autoload.php';
