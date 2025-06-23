@@ -2,29 +2,21 @@
 
 namespace App\Services;
 
-use GuzzleHttp\Client;
 use Illuminate\Support\Facades\Log;
 
 class OpenAIConfig
 {
     protected $apiUrl;
-    protected $client;
     protected $model;
 
     public function __construct()
     {
-        // Use only the working endpoint
         $this->apiUrl = env('LOCAL_AI_API_URL', 'http://10.58.38.218:30011/v1/completions');
         $this->model = env('LOCAL_AI_MODEL', '/mnt/data/llms/Llama-3.3-70B-Instruct');
-        $this->client = new Client();
     }
 
     /**
-     * Sends a request to Local AI API with a given prompt and review.
-     *
-     * @param string $prompt
-     * @param string $reviewText
-     * @return array|null
+     * Sends a request to Local AI API using raw cURL
      */
     public function sendRequest($prompt, $reviewText)
     {
@@ -40,43 +32,50 @@ class OpenAIConfig
         ];
 
         try {
-            Log::info('Sending AI request:', [
+            Log::info('Sending AI request via cURL:', [
                 'url' => $this->apiUrl,
                 'promptLength' => strlen($combinedPrompt)
             ]);
 
-            $response = $this->client->post($this->apiUrl, [
-                'headers' => [
-                    'Content-Type' => 'application/json',
-                    'Accept' => 'application/json',
-                    'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                    'Accept-Language' => 'en-US,en;q=0.9',
-                    'Accept-Encoding' => 'gzip, deflate',
-                    'Connection' => 'keep-alive',
-                    'Cache-Control' => 'no-cache',
+            // Use raw cURL to match your working terminal command
+            $ch = curl_init();
+            
+            curl_setopt_array($ch, [
+                CURLOPT_URL => $this->apiUrl,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => json_encode($requestBody),
+                CURLOPT_HTTPHEADER => [
+                    'Content-Type: application/json',
+                    'Accept: application/json',
+                    'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 ],
-                'json' => $requestBody,
-                'proxy' => [
-                    'http' => null,
-                    'https' => null,
-                ],
-                'timeout' => 300,
-                'connect_timeout' => 30,
-                'verify' => false,
-                'curl' => [
-                    CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    CURLOPT_FOLLOWLOCATION => false,
-                    CURLOPT_SSL_VERIFYPEER => false,
-                    CURLOPT_SSL_VERIFYHOST => false,
-                ]
+                CURLOPT_TIMEOUT => 300,
+                CURLOPT_CONNECTTIMEOUT => 30,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_SSL_VERIFYHOST => false,
+                CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_PROXY => '',
+                CURLOPT_NOPROXY => '*'
             ]);
 
-            $responseBody = json_decode($response->getBody()->getContents(), true);
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $error = curl_error($ch);
+            curl_close($ch);
 
-            Log::info('AI response received:', [
-                'statusCode' => $response->getStatusCode(),
+            if ($error) {
+                Log::error('cURL error:', ['error' => $error]);
+                return null;
+            }
+
+            $responseBody = json_decode($response, true);
+
+            Log::info('AI response received via cURL:', [
+                'statusCode' => $httpCode,
                 'hasChoices' => isset($responseBody['choices']),
-                'hasText' => isset($responseBody['choices'][0]['text'])
+                'hasText' => isset($responseBody['choices'][0]['text']),
+                'responsePreview' => substr($response, 0, 200)
             ]);
 
             // Extract the text from the response structure
@@ -88,9 +87,8 @@ class OpenAIConfig
                     return null;
                 }
                 
-                Log::info('Raw AI content received:', [
-                    'contentLength' => strlen($rawContent),
-                    'contentPreview' => substr($rawContent, 0, 100) . '...'
+                Log::info('Raw AI content received via cURL:', [
+                    'contentLength' => strlen($rawContent)
                 ]);
                 
                 $cleanedContent = $this->extractAndCleanJsonFromResponse($rawContent);
@@ -105,23 +103,20 @@ class OpenAIConfig
                     ]
                 ];
             } else {
-                Log::warning('No choices[0].text in response:', [
+                Log::warning('No choices[0].text in cURL response:', [
                     'responseKeys' => array_keys($responseBody ?? [])
                 ]);
                 return null;
             }
 
         } catch (\Exception $e) {
-            Log::error('Local AI API Request Failed: ' . $e->getMessage());
+            Log::error('AI API Request Failed via cURL: ' . $e->getMessage());
             return null;
         }
     }
 
     /**
      * Extract and clean JSON from the AI response
-     *
-     * @param string $rawResponse
-     * @return string
      */
     private function extractAndCleanJsonFromResponse($rawResponse)
     {
@@ -160,9 +155,6 @@ class OpenAIConfig
 
     /**
      * Create basic sentiment response when JSON extraction fails
-     *
-     * @param string $response
-     * @return string
      */
     private function createBasicSentimentResponse($response)
     {
