@@ -1,3 +1,7 @@
+        Http::pool(fn ($pool) => [
+            $pool->withoutVerifying()->async()->post('https://ai-scrapping-backend.etisalat.corp.ae/scrape_nest_only/', $this->data)
+        ]);
+
 [2025-06-23 11:58:14] local.ERROR: cURL error 60: SSL certificate problem: unable to get local issuer certificate (see https://curl.haxx.se/libcurl/c/libcurl-errors.html) for https://api-mt1.pusher.com/apps/1772075/events?auth_key=e5ef67f74f81ae0ecafb&auth_timestamp=1750679893&auth_version=1.0&body_md5=405dbff43b2eab6139b7699c1667c571&auth_signature=07395adc78dc020e0bde2233b89a3929cd1b0ec2f160a6bf4ef72f5e980a056d {"exception":"[object] (GuzzleHttp\\Exception\\RequestException(code: 200): cURL error 60: SSL certificate problem: unable to get local issuer certificate (see https://curl.haxx.se/libcurl/c/libcurl-errors.html) for https://api-mt1.pusher.com/apps/1772075/events?auth_key=e5ef67f74f81ae0ecafb&auth_timestamp=1750679893&auth_version=1.0&body_md5=405dbff43b2eab6139b7699c1667c571&auth_signature=07395adc78dc020e0bde2233b89a3929cd1b0ec2f160a6bf4ef72f5e980a056d at /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Handler/CurlFactory.php:276)
 [stacktrace]
 #0 /var/www/html/Web-Scrapping-Backend/vendor/guzzlehttp/guzzle/src/Handler/CurlFactory.php(205): GuzzleHttp\\Handler\\CurlFactory::createRejection()
