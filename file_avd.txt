@@ -1,452 +1,468 @@
-ProcessSingleReviewAnalysis (New Job)
-
-<?php
-
-namespace App\Jobs;
-
-use App\Http\Controllers\SentimentAssets\SentimentAssetsController;
-use App\Models\User;
-use App\Models\UserJob;
-use App\Services\OpenAIConfig;
-use App\Services\OpenAIPrompt;
-use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Foundation\Bus\Dispatchable;
-use Illuminate\Queue\InteractsWithQueue;
-use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Log;
-use Yethee\Tiktoken\EncoderProvider;
-
-class ProcessSingleReviewAnalysis implements ShouldQueue
-{
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
-
-    public $timeout = 300; // 5 minutes timeout
-    public $tries = 2; // Retry once on failure
-
-    protected $reviewId;
-    protected $appId;
-    protected $userId;
-    protected $source;
-    protected $jobId;
-    protected $brandDetails;
-
-    /**
-     * Create a new job instance.
-     */
-    public function __construct($reviewId, $appId, $userId, $source, $jobId, $brandDetails)
-    {
-        $this->reviewId = $reviewId;
-        $this->appId = $appId;
-        $this->userId = $userId;
-        $this->source = $source;
-        $this->jobId = $jobId;
-        $this->brandDetails = $brandDetails;
-    }
-
-    /**
-     * Execute the job.
-     */
-    public function handle(): void
-    {
-        $user = User::find($this->userId);
-        
-        if (!$user) {
-            Log::error('User not found for single review analysis', ['userId' => $this->userId]);
-            return;
-        }
-
-        $assets = new SentimentAssetsController();
-
-        // Fetch the review data
-        $result = $assets->fetchReviewData($this->appId, $this->reviewId, $this->source);
-        
-        if (!$result) {
-            Log::error('Review data not found', ['reviewId' => $this->reviewId, 'appId' => $this->appId]);
-            return;
-        }
-
-        // Generate the prompt
-        $openAIPrompt = new OpenAIPrompt();
-        $prompt = $openAIPrompt->sentimentAnalysisPrompt($this->brandDetails);
-
-        // Calculate tokens
-        $encoder = (new EncoderProvider())->getForModel('gpt-4o');
-        $inputTokens = $assets->calculateTokens($prompt, $result->text);
-
-        // Refresh user data
-        $user->refresh();
-
-        // Check if the user has sufficient tokens
-        if ($user->user_token < $inputTokens) {
-            Log::info('Insufficient tokens for single review', [
-                'userId' => $user->id,
-                'reviewId' => $this->reviewId,
-                'requiredTokens' => $inputTokens,
-                'availableTokens' => $user->user_token
-            ]);
-            return;
-        }
-
-        // Check if already processed
-        if ($this->source == "google" && \App\Models\GoogleReviewSentiment::where('review_id', $this->reviewId)->exists()) {
-            Log::info('Review already processed', ['reviewId' => $this->reviewId]);
-            $this->incrementJobCounter();
-            return;
-        }
-
-        if ($this->source == "apple" && \App\Models\AppleReviewSentiment::where('review_id', $this->reviewId)->exists()) {
-            Log::info('Review already processed', ['reviewId' => $this->reviewId]);
-            $this->incrementJobCounter();
-            return;
-        }
-
-        // Initialize AI Config and send request (same as working single review)
-        $openAIConfig = new OpenAIConfig();
-        
-        try {
-            Log::info('Processing single review', ['reviewId' => $this->reviewId]);
-            
-            // Send the prompt and review text to AI for analysis (exactly like working single review)
-            $response = $openAIConfig->sendRequest($prompt, $result->text);
-
-            // Check if the response is valid (exactly like working single review)
-            if ($response && isset($response['choices'][0]['message']['content'])) {
-                // Process the content returned by AI (exactly like working single review)
-                $assets->processContent(
-                    $response['choices'][0]['message']['content'], 
-                    $this->reviewId, 
-                    $inputTokens, 
-                    $user, 
-                    $this->source,
-                    $this->jobId
-                );
-
-                Log::info('Single review analysis completed successfully', ['reviewId' => $this->reviewId]);
-            } else {
-                Log::warning('AI returned no content for single review', ['reviewId' => $this->reviewId]);
-                throw new \Exception('AI returned no valid content');
-            }
-
-        } catch (\Exception $e) {
-            Log::error('Single review analysis failed', [
-                'reviewId' => $this->reviewId,
-                'error' => $e->getMessage()
-            ]);
-            
-            // Re-throw to trigger retry mechanism
-            throw $e;
-        }
-    }
-
-    /**
-     * Increment job counter
-     */
-    private function incrementJobCounter()
-    {
-        if ($this->jobId !== null) {
-            try {
-                $userJob = \App\Models\UserJob::find($this->jobId);
-                if ($userJob) {
-                    $userJob->increment('completed_count');
-                    Log::info('Job counter incremented for skipped review', [
-                        'jobId' => $this->jobId,
-                        'reviewId' => $this->reviewId
-                    ]);
-                }
-            } catch (\Exception $e) {
-                Log::error('Failed to increment job counter', [
-                    'jobId' => $this->jobId,
-                    'error' => $e->getMessage()
-                ]);
-            }
-        }
-    }
-
-    /**
-     * Handle a job failure.
-     */
-    public function failed(\Throwable $exception)
-    {
-        Log::error('Single review analysis permanently failed', [
-            'reviewId' => $this->reviewId,
-            'userId' => $this->userId,
-            'error' => $exception->getMessage()
-        ]);
-    }
-}
-
-########################################
-########################################
-########################################
-
-<?php
-
-namespace App\Jobs;
-
-use App\Events\NewSentimentEvent;
-use App\Http\Controllers\SentimentAssets\SentimentAssetsController;
-use App\Models\GoogleApp;
-use App\Models\User;
-use App\Models\UserJob;
-use App\Notifications\GoogleSentiment;
-use App\Services\OpenAIPrompt;
-use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Foundation\Bus\Dispatchable;
-use Illuminate\Queue\InteractsWithQueue;
-use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Log;
-
-class ProcessGooglePlayAnalysis implements ShouldQueue
-{
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
-
-    public $timeout = 1800; // 30 minutes timeout
-    protected $requestData;
-    protected $userId;
-    
-    /**
-     * Create a new job instance.
-     */
-    public function __construct($requestData, $userId)
-    {
-        $this->requestData = $requestData;
-        $this->userId = $userId;
-    }
-
-    /**
-     * Execute the job.
-     */
-    public function handle(): void
-    {
-        $validatedData = $this->requestData;
-        $user = User::find($this->userId);
-        $job = null;
-
-        try {
-            if (!$user) {
-                Log::error('User not found', ['userId' => $this->userId]);
-                return;
-            }
-
-            // Save job details in `user_jobs`
-            $job = new UserJob([
-                'job_id'        => $this->job->getJobId(),
-                'status'        => 'processing',
-                'request_type'  => 'sentiment',
-                'request_count' => $validatedData['number_of_reviews'],
-                'completed_count' => 0,
-                'user_id' => $user->id
-            ]);
-
-            $googleApp = GoogleApp::find($validatedData['appId']);
-            if (!$googleApp) {
-                Log::error('Google app not found', ['appId' => $validatedData['appId']]);
-                return;
-            }
-            
-            $googleApp->jobs()->save($job);
-            $jobId = $job->id;
-
-            $assets = new SentimentAssetsController();
-
-            $reviews = $assets->fetchReviews($validatedData['appId'], $validatedData['number_of_reviews'], "google");
-            
-            if (empty($reviews)) {
-                Log::warning('No reviews found to process', ['appId' => $validatedData['appId']]);
-                $job->update(['status' => 'completed']);
-                return;
-            }
-
-            $brandDetails = $assets->getBrandDetails($validatedData['appId'], "google");
-
-            if (empty($brandDetails)) {
-                Log::error('App details not found', ['appId' => $validatedData['appId']]);
-                $job->update(['status' => 'failed']);
-                return;
-            }
-
-            Log::info('Starting individual review job dispatch', [
-                'totalReviews' => count($reviews),
-                'appId' => $validatedData['appId'],
-                'jobId' => $jobId
-            ]);
-
-            // Dispatch individual jobs for each review with delays
-            $delay = 0;
-            foreach ($reviews as $index => $review) {
-                // Dispatch each review as a separate job with increasing delay
-                ProcessSingleReviewAnalysis::dispatch(
-                    $review->id,
-                    $validatedData['appId'],
-                    $user->id,
-                    'google',
-                    $jobId,
-                    $brandDetails
-                )->delay(now()->addSeconds($delay));
-
-                // Increase delay by 5 seconds for each subsequent job
-                $delay += 5;
-
-                Log::info('Dispatched single review job', [
-                    'reviewId' => $review->id,
-                    'delay' => $delay - 5,
-                    'jobIndex' => $index + 1
-                ]);
-            }
-
-            // Update job status to processing (individual jobs will update completed_count)
-            $job->update(['status' => 'processing']);
-
-            Log::info('All individual review jobs dispatched', [
-                'totalJobs' => count($reviews),
-                'appId' => $validatedData['appId'],
-                'jobId' => $jobId,
-                'totalDelay' => $delay
-            ]);
-
-            // Schedule a job to check completion and send notification
-            CheckBatchCompletion::dispatch($jobId, $user->id, $brandDetails)
-                ->delay(now()->addSeconds($delay + 60)); // Check 1 minute after last job
-
-        } catch (\Exception $e) {
-            Log::error("Batch job dispatch failed: {$e->getMessage()}", [
-                'userId' => $this->userId,
-                'appId' => $validatedData['appId'] ?? null,
-                'exception' => $e,
-            ]);
-
-            if ($job) {
-                $job->update(['status' => 'failed']);
-            }
-
-            throw $e;
-        }
-    }
-}
-
-
-########################################
-########################################
-########################################
-
-CheckBatchCompletion (New Job)
-
-<?php
-
-namespace App\Jobs;
-
-use App\Events\NewSentimentEvent;
-use App\Models\User;
-use App\Models\UserJob;
-use App\Notifications\GoogleSentiment;
-use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Foundation\Bus\Dispatchable;
-use Illuminate\Queue\InteractsWithQueue;
-use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Log;
-
-class CheckBatchCompletion implements ShouldQueue
-{
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
-
-    public $timeout = 60;
-    
-    protected $jobId;
-    protected $userId;
-    protected $brandDetails;
-
-    /**
-     * Create a new job instance.
-     */
-    public function __construct($jobId, $userId, $brandDetails)
-    {
-        $this->jobId = $jobId;
-        $this->userId = $userId;
-        $this->brandDetails = $brandDetails;
-    }
-
-    /**
-     * Execute the job.
-     */
-    public function handle(): void
-    {
-        try {
-            $job = UserJob::find($this->jobId);
-            $user = User::find($this->userId);
-
-            if (!$job || !$user) {
-                Log::error('Job or user not found for completion check', [
-                    'jobId' => $this->jobId,
-                    'userId' => $this->userId
-                ]);
-                return;
-            }
-
-            Log::info('Checking batch completion', [
-                'jobId' => $this->jobId,
-                'completedCount' => $job->completed_count,
-                'requestCount' => $job->request_count
-            ]);
-
-            // Check if all reviews have been processed
-            if ($job->completed_count >= $job->request_count) {
-                // Mark job as completed
-                $job->update(['status' => 'completed']);
-
-                Log::info('Batch processing completed', [
-                    'jobId' => $this->jobId,
-                    'completedCount' => $job->completed_count,
-                    'requestCount' => $job->request_count
-                ]);
-
-                // Send notification if user still has tokens
-                if ($user->user_token > 0) {
-                    try {
-                        $user->notify(new GoogleSentiment(
-                            $this->brandDetails['brandName'], 
-                            $this->brandDetails['brandId']
-                        ));
-                        Log::info('Completion notification sent', ['userId' => $user->id]);
-                    } catch (\Exception $e) {
-                        Log::error('Failed to send completion notification', [
-                            'userId' => $user->id,
-                            'error' => $e->getMessage()
-                        ]);
-                    }
-                }
-
-                // Broadcast completion event
-                try {
-                    broadcast(new NewSentimentEvent());
-                } catch (\Exception $e) {
-                    Log::error('Failed to broadcast completion event', [
-                        'error' => $e->getMessage()
-                    ]);
-                }
-
-            } else {
-                // Not all jobs completed yet, schedule another check
-                Log::info('Batch not yet complete, scheduling another check', [
-                    'jobId' => $this->jobId,
-                    'completedCount' => $job->completed_count,
-                    'requestCount' => $job->request_count
-                ]);
-
-                CheckBatchCompletion::dispatch($this->jobId, $this->userId, $this->brandDetails)
-                    ->delay(now()->addMinutes(2)); // Check again in 2 minutes
-            }
-
-        } catch (\Exception $e) {
-            Log::error('Batch completion check failed', [
-                'jobId' => $this->jobId,
-                'error' => $e->getMessage()
-            ]);
-        }
-    }
-}
-
-
-
+[2025-06-23 14:37:00] local.ERROR: App\Events\NewSentimentEvent has been attempted too many times. {"exception":"[object] (Illuminate\\Queue\\MaxAttemptsExceededException(code: 0): App\\Events\\NewSentimentEvent has been attempted too many times. at /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/MaxAttemptsExceededException.php:24)
+[stacktrace]
+#0 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(794): Illuminate\\Queue\\MaxAttemptsExceededException::forJob()
+#1 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(528): Illuminate\\Queue\\Worker->maxAttemptsExceededException()
+#2 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(431): Illuminate\\Queue\\Worker->markJobAsFailedIfAlreadyExceedsMaxAttempts()
+#3 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(392): Illuminate\\Queue\\Worker->process()
+#4 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(178): Illuminate\\Queue\\Worker->runJob()
+#5 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#6 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#7 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#8 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#9 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#10 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#11 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#12 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(213): Illuminate\\Container\\Container->call()
+#13 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Command/Command.php(279): Illuminate\\Console\\Command->execute()
+#14 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(182): Symfony\\Component\\Console\\Command\\Command->run()
+#15 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(1094): Illuminate\\Console\\Command->run()
+#16 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(342): Symfony\\Component\\Console\\Application->doRunCommand()
+#17 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(193): Symfony\\Component\\Console\\Application->doRun()
+#18 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#19 /var/www/html/Web-Scrapping-Backend/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle()
+#20 {main}
+"} 
+[2025-06-23 14:49:40] local.INFO: Starting individual review job dispatch {"totalReviews":5,"appId":"1","jobId":35} 
+[2025-06-23 14:49:40] local.INFO: Dispatched single review job {"reviewId":5926,"delay":0,"jobIndex":1} 
+[2025-06-23 14:49:40] local.INFO: Dispatched single review job {"reviewId":5928,"delay":5,"jobIndex":2} 
+[2025-06-23 14:49:40] local.INFO: Dispatched single review job {"reviewId":5929,"delay":10,"jobIndex":3} 
+[2025-06-23 14:49:40] local.INFO: Dispatched single review job {"reviewId":5930,"delay":15,"jobIndex":4} 
+[2025-06-23 14:49:40] local.INFO: Dispatched single review job {"reviewId":5931,"delay":20,"jobIndex":5} 
+[2025-06-23 14:49:40] local.INFO: All individual review jobs dispatched {"totalJobs":5,"appId":"1","jobId":35,"totalDelay":25} 
+[2025-06-23 14:49:41] local.INFO: Processing single review {"reviewId":5926} 
+[2025-06-23 14:49:41] local.INFO: Sending AI request: {"url":"http://10.58.38.218:30011/v1/completions","promptLength":1243} 
+[2025-06-23 14:49:41] local.INFO: AI response received: {"statusCode":200,"hasChoices":false,"hasText":false} 
+[2025-06-23 14:49:41] local.WARNING: No choices[0].text in response: {"responseKeys":[]} 
+[2025-06-23 14:49:41] local.WARNING: AI returned no content for single review {"reviewId":5926} 
+[2025-06-23 14:49:41] local.ERROR: Single review analysis failed {"reviewId":5926,"error":"AI returned no valid content"} 
+[2025-06-23 14:49:41] local.ERROR: AI returned no valid content {"exception":"[object] (Exception(code: 0): AI returned no valid content at /var/www/html/Web-Scrapping-Backend/app/Jobs/ProcessSingleReviewAnalysis.php:126)
+[stacktrace]
+#0 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Jobs\\ProcessSingleReviewAnalysis->handle()
+#1 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#2 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#3 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#4 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#5 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(126): Illuminate\\Container\\Container->call()
+#6 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Bus\\Dispatcher->Illuminate\\Bus\\{closure}()
+#7 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#8 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(130): Illuminate\\Pipeline\\Pipeline->then()
+#9 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(126): Illuminate\\Bus\\Dispatcher->dispatchNow()
+#10 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Queue\\CallQueuedHandler->Illuminate\\Queue\\{closure}()
+#11 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#12 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(121): Illuminate\\Pipeline\\Pipeline->then()
+#13 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(69): Illuminate\\Queue\\CallQueuedHandler->dispatchThroughMiddleware()
+#14 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Jobs/Job.php(102): Illuminate\\Queue\\CallQueuedHandler->call()
+#15 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(442): Illuminate\\Queue\\Jobs\\Job->fire()
+#16 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(392): Illuminate\\Queue\\Worker->process()
+#17 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(178): Illuminate\\Queue\\Worker->runJob()
+#18 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#19 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#20 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#21 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#22 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#23 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#24 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#25 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(213): Illuminate\\Container\\Container->call()
+#26 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Command/Command.php(279): Illuminate\\Console\\Command->execute()
+#27 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(182): Symfony\\Component\\Console\\Command\\Command->run()
+#28 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(1094): Illuminate\\Console\\Command->run()
+#29 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(342): Symfony\\Component\\Console\\Application->doRunCommand()
+#30 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(193): Symfony\\Component\\Console\\Application->doRun()
+#31 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#32 /var/www/html/Web-Scrapping-Backend/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle()
+#33 {main}
+"} 
+[2025-06-23 14:49:48] local.INFO: Processing single review {"reviewId":5928} 
+[2025-06-23 14:49:48] local.INFO: Sending AI request: {"url":"http://10.58.38.218:30011/v1/completions","promptLength":1250} 
+[2025-06-23 14:49:48] local.INFO: AI response received: {"statusCode":200,"hasChoices":false,"hasText":false} 
+[2025-06-23 14:49:48] local.WARNING: No choices[0].text in response: {"responseKeys":[]} 
+[2025-06-23 14:49:48] local.WARNING: AI returned no content for single review {"reviewId":5928} 
+[2025-06-23 14:49:48] local.ERROR: Single review analysis failed {"reviewId":5928,"error":"AI returned no valid content"} 
+[2025-06-23 14:49:48] local.ERROR: AI returned no valid content {"exception":"[object] (Exception(code: 0): AI returned no valid content at /var/www/html/Web-Scrapping-Backend/app/Jobs/ProcessSingleReviewAnalysis.php:126)
+[stacktrace]
+#0 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Jobs\\ProcessSingleReviewAnalysis->handle()
+#1 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#2 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#3 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#4 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#5 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(126): Illuminate\\Container\\Container->call()
+#6 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Bus\\Dispatcher->Illuminate\\Bus\\{closure}()
+#7 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#8 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(130): Illuminate\\Pipeline\\Pipeline->then()
+#9 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(126): Illuminate\\Bus\\Dispatcher->dispatchNow()
+#10 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Queue\\CallQueuedHandler->Illuminate\\Queue\\{closure}()
+#11 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#12 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(121): Illuminate\\Pipeline\\Pipeline->then()
+#13 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(69): Illuminate\\Queue\\CallQueuedHandler->dispatchThroughMiddleware()
+#14 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Jobs/Job.php(102): Illuminate\\Queue\\CallQueuedHandler->call()
+#15 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(442): Illuminate\\Queue\\Jobs\\Job->fire()
+#16 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(392): Illuminate\\Queue\\Worker->process()
+#17 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(178): Illuminate\\Queue\\Worker->runJob()
+#18 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#19 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#20 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#21 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#22 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#23 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#24 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#25 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(213): Illuminate\\Container\\Container->call()
+#26 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Command/Command.php(279): Illuminate\\Console\\Command->execute()
+#27 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(182): Symfony\\Component\\Console\\Command\\Command->run()
+#28 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(1094): Illuminate\\Console\\Command->run()
+#29 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(342): Symfony\\Component\\Console\\Application->doRunCommand()
+#30 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(193): Symfony\\Component\\Console\\Application->doRun()
+#31 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#32 /var/www/html/Web-Scrapping-Backend/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle()
+#33 {main}
+"} 
+[2025-06-23 14:49:51] local.INFO: Processing single review {"reviewId":5929} 
+[2025-06-23 14:49:51] local.INFO: Sending AI request: {"url":"http://10.58.38.218:30011/v1/completions","promptLength":1213} 
+[2025-06-23 14:49:51] local.INFO: AI response received: {"statusCode":200,"hasChoices":false,"hasText":false} 
+[2025-06-23 14:49:51] local.WARNING: No choices[0].text in response: {"responseKeys":[]} 
+[2025-06-23 14:49:51] local.WARNING: AI returned no content for single review {"reviewId":5929} 
+[2025-06-23 14:49:51] local.ERROR: Single review analysis failed {"reviewId":5929,"error":"AI returned no valid content"} 
+[2025-06-23 14:49:51] local.ERROR: AI returned no valid content {"exception":"[object] (Exception(code: 0): AI returned no valid content at /var/www/html/Web-Scrapping-Backend/app/Jobs/ProcessSingleReviewAnalysis.php:126)
+[stacktrace]
+#0 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Jobs\\ProcessSingleReviewAnalysis->handle()
+#1 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#2 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#3 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#4 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#5 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(126): Illuminate\\Container\\Container->call()
+#6 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Bus\\Dispatcher->Illuminate\\Bus\\{closure}()
+#7 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#8 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(130): Illuminate\\Pipeline\\Pipeline->then()
+#9 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(126): Illuminate\\Bus\\Dispatcher->dispatchNow()
+#10 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Queue\\CallQueuedHandler->Illuminate\\Queue\\{closure}()
+#11 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#12 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(121): Illuminate\\Pipeline\\Pipeline->then()
+#13 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(69): Illuminate\\Queue\\CallQueuedHandler->dispatchThroughMiddleware()
+#14 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Jobs/Job.php(102): Illuminate\\Queue\\CallQueuedHandler->call()
+#15 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(442): Illuminate\\Queue\\Jobs\\Job->fire()
+#16 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(392): Illuminate\\Queue\\Worker->process()
+#17 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(178): Illuminate\\Queue\\Worker->runJob()
+#18 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#19 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#20 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#21 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#22 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#23 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#24 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#25 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(213): Illuminate\\Container\\Container->call()
+#26 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Command/Command.php(279): Illuminate\\Console\\Command->execute()
+#27 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(182): Symfony\\Component\\Console\\Command\\Command->run()
+#28 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(1094): Illuminate\\Console\\Command->run()
+#29 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(342): Symfony\\Component\\Console\\Application->doRunCommand()
+#30 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(193): Symfony\\Component\\Console\\Application->doRun()
+#31 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#32 /var/www/html/Web-Scrapping-Backend/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle()
+#33 {main}
+"} 
+[2025-06-23 14:49:58] local.INFO: Processing single review {"reviewId":5930} 
+[2025-06-23 14:49:58] local.INFO: Sending AI request: {"url":"http://10.58.38.218:30011/v1/completions","promptLength":1309} 
+[2025-06-23 14:49:58] local.INFO: AI response received: {"statusCode":200,"hasChoices":false,"hasText":false} 
+[2025-06-23 14:49:58] local.WARNING: No choices[0].text in response: {"responseKeys":[]} 
+[2025-06-23 14:49:58] local.WARNING: AI returned no content for single review {"reviewId":5930} 
+[2025-06-23 14:49:58] local.ERROR: Single review analysis failed {"reviewId":5930,"error":"AI returned no valid content"} 
+[2025-06-23 14:49:58] local.ERROR: AI returned no valid content {"exception":"[object] (Exception(code: 0): AI returned no valid content at /var/www/html/Web-Scrapping-Backend/app/Jobs/ProcessSingleReviewAnalysis.php:126)
+[stacktrace]
+#0 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Jobs\\ProcessSingleReviewAnalysis->handle()
+#1 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#2 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#3 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#4 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#5 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(126): Illuminate\\Container\\Container->call()
+#6 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Bus\\Dispatcher->Illuminate\\Bus\\{closure}()
+#7 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#8 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(130): Illuminate\\Pipeline\\Pipeline->then()
+#9 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(126): Illuminate\\Bus\\Dispatcher->dispatchNow()
+#10 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Queue\\CallQueuedHandler->Illuminate\\Queue\\{closure}()
+#11 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#12 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(121): Illuminate\\Pipeline\\Pipeline->then()
+#13 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(69): Illuminate\\Queue\\CallQueuedHandler->dispatchThroughMiddleware()
+#14 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Jobs/Job.php(102): Illuminate\\Queue\\CallQueuedHandler->call()
+#15 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(442): Illuminate\\Queue\\Jobs\\Job->fire()
+#16 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(392): Illuminate\\Queue\\Worker->process()
+#17 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(178): Illuminate\\Queue\\Worker->runJob()
+#18 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#19 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#20 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#21 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#22 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#23 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#24 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#25 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(213): Illuminate\\Container\\Container->call()
+#26 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Command/Command.php(279): Illuminate\\Console\\Command->execute()
+#27 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(182): Symfony\\Component\\Console\\Command\\Command->run()
+#28 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(1094): Illuminate\\Console\\Command->run()
+#29 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(342): Symfony\\Component\\Console\\Application->doRunCommand()
+#30 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(193): Symfony\\Component\\Console\\Application->doRun()
+#31 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#32 /var/www/html/Web-Scrapping-Backend/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle()
+#33 {main}
+"} 
+[2025-06-23 14:50:01] local.INFO: Processing single review {"reviewId":5931} 
+[2025-06-23 14:50:01] local.INFO: Sending AI request: {"url":"http://10.58.38.218:30011/v1/completions","promptLength":1218} 
+[2025-06-23 14:50:02] local.INFO: AI response received: {"statusCode":200,"hasChoices":false,"hasText":false} 
+[2025-06-23 14:50:02] local.WARNING: No choices[0].text in response: {"responseKeys":[]} 
+[2025-06-23 14:50:02] local.WARNING: AI returned no content for single review {"reviewId":5931} 
+[2025-06-23 14:50:02] local.ERROR: Single review analysis failed {"reviewId":5931,"error":"AI returned no valid content"} 
+[2025-06-23 14:50:02] local.ERROR: AI returned no valid content {"exception":"[object] (Exception(code: 0): AI returned no valid content at /var/www/html/Web-Scrapping-Backend/app/Jobs/ProcessSingleReviewAnalysis.php:126)
+[stacktrace]
+#0 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Jobs\\ProcessSingleReviewAnalysis->handle()
+#1 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#2 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#3 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#4 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#5 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(126): Illuminate\\Container\\Container->call()
+#6 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Bus\\Dispatcher->Illuminate\\Bus\\{closure}()
+#7 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#8 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(130): Illuminate\\Pipeline\\Pipeline->then()
+#9 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(126): Illuminate\\Bus\\Dispatcher->dispatchNow()
+#10 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Queue\\CallQueuedHandler->Illuminate\\Queue\\{closure}()
+#11 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#12 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(121): Illuminate\\Pipeline\\Pipeline->then()
+#13 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(69): Illuminate\\Queue\\CallQueuedHandler->dispatchThroughMiddleware()
+#14 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Jobs/Job.php(102): Illuminate\\Queue\\CallQueuedHandler->call()
+#15 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(442): Illuminate\\Queue\\Jobs\\Job->fire()
+#16 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(392): Illuminate\\Queue\\Worker->process()
+#17 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(178): Illuminate\\Queue\\Worker->runJob()
+#18 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#19 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#20 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#21 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#22 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#23 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#24 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#25 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(213): Illuminate\\Container\\Container->call()
+#26 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Command/Command.php(279): Illuminate\\Console\\Command->execute()
+#27 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(182): Symfony\\Component\\Console\\Command\\Command->run()
+#28 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(1094): Illuminate\\Console\\Command->run()
+#29 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(342): Symfony\\Component\\Console\\Application->doRunCommand()
+#30 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(193): Symfony\\Component\\Console\\Application->doRun()
+#31 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#32 /var/www/html/Web-Scrapping-Backend/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle()
+#33 {main}
+"} 
+[2025-06-23 14:50:41] local.INFO: Processing single review {"reviewId":5926} 
+[2025-06-23 14:50:41] local.INFO: Sending AI request: {"url":"http://10.58.38.218:30011/v1/completions","promptLength":1243} 
+[2025-06-23 14:50:41] local.INFO: AI response received: {"statusCode":200,"hasChoices":false,"hasText":false} 
+[2025-06-23 14:50:41] local.WARNING: No choices[0].text in response: {"responseKeys":[]} 
+[2025-06-23 14:50:41] local.WARNING: AI returned no content for single review {"reviewId":5926} 
+[2025-06-23 14:50:41] local.ERROR: Single review analysis failed {"reviewId":5926,"error":"AI returned no valid content"} 
+[2025-06-23 14:50:41] local.ERROR: Single review analysis permanently failed {"reviewId":5926,"userId":1,"error":"AI returned no valid content"} 
+[2025-06-23 14:50:41] local.ERROR: AI returned no valid content {"exception":"[object] (Exception(code: 0): AI returned no valid content at /var/www/html/Web-Scrapping-Backend/app/Jobs/ProcessSingleReviewAnalysis.php:126)
+[stacktrace]
+#0 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Jobs\\ProcessSingleReviewAnalysis->handle()
+#1 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#2 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#3 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#4 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#5 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(126): Illuminate\\Container\\Container->call()
+#6 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Bus\\Dispatcher->Illuminate\\Bus\\{closure}()
+#7 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#8 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(130): Illuminate\\Pipeline\\Pipeline->then()
+#9 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(126): Illuminate\\Bus\\Dispatcher->dispatchNow()
+#10 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Queue\\CallQueuedHandler->Illuminate\\Queue\\{closure}()
+#11 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#12 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(121): Illuminate\\Pipeline\\Pipeline->then()
+#13 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(69): Illuminate\\Queue\\CallQueuedHandler->dispatchThroughMiddleware()
+#14 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Jobs/Job.php(102): Illuminate\\Queue\\CallQueuedHandler->call()
+#15 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(442): Illuminate\\Queue\\Jobs\\Job->fire()
+#16 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(392): Illuminate\\Queue\\Worker->process()
+#17 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(178): Illuminate\\Queue\\Worker->runJob()
+#18 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#19 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#20 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#21 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#22 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#23 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#24 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#25 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(213): Illuminate\\Container\\Container->call()
+#26 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Command/Command.php(279): Illuminate\\Console\\Command->execute()
+#27 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(182): Symfony\\Component\\Console\\Command\\Command->run()
+#28 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(1094): Illuminate\\Console\\Command->run()
+#29 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(342): Symfony\\Component\\Console\\Application->doRunCommand()
+#30 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(193): Symfony\\Component\\Console\\Application->doRun()
+#31 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#32 /var/www/html/Web-Scrapping-Backend/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle()
+#33 {main}
+"} 
+[2025-06-23 14:50:51] local.INFO: Processing single review {"reviewId":5928} 
+[2025-06-23 14:50:51] local.INFO: Sending AI request: {"url":"http://10.58.38.218:30011/v1/completions","promptLength":1250} 
+[2025-06-23 14:50:51] local.INFO: AI response received: {"statusCode":200,"hasChoices":false,"hasText":false} 
+[2025-06-23 14:50:51] local.WARNING: No choices[0].text in response: {"responseKeys":[]} 
+[2025-06-23 14:50:51] local.WARNING: AI returned no content for single review {"reviewId":5928} 
+[2025-06-23 14:50:51] local.ERROR: Single review analysis failed {"reviewId":5928,"error":"AI returned no valid content"} 
+[2025-06-23 14:50:51] local.ERROR: Single review analysis permanently failed {"reviewId":5928,"userId":1,"error":"AI returned no valid content"} 
+[2025-06-23 14:50:51] local.ERROR: AI returned no valid content {"exception":"[object] (Exception(code: 0): AI returned no valid content at /var/www/html/Web-Scrapping-Backend/app/Jobs/ProcessSingleReviewAnalysis.php:126)
+[stacktrace]
+#0 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Jobs\\ProcessSingleReviewAnalysis->handle()
+#1 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#2 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#3 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#4 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#5 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(126): Illuminate\\Container\\Container->call()
+#6 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Bus\\Dispatcher->Illuminate\\Bus\\{closure}()
+#7 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#8 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(130): Illuminate\\Pipeline\\Pipeline->then()
+#9 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(126): Illuminate\\Bus\\Dispatcher->dispatchNow()
+#10 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Queue\\CallQueuedHandler->Illuminate\\Queue\\{closure}()
+#11 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#12 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(121): Illuminate\\Pipeline\\Pipeline->then()
+#13 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(69): Illuminate\\Queue\\CallQueuedHandler->dispatchThroughMiddleware()
+#14 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Jobs/Job.php(102): Illuminate\\Queue\\CallQueuedHandler->call()
+#15 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(442): Illuminate\\Queue\\Jobs\\Job->fire()
+#16 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(392): Illuminate\\Queue\\Worker->process()
+#17 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(178): Illuminate\\Queue\\Worker->runJob()
+#18 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#19 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#20 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#21 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#22 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#23 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#24 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#25 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(213): Illuminate\\Container\\Container->call()
+#26 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Command/Command.php(279): Illuminate\\Console\\Command->execute()
+#27 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(182): Symfony\\Component\\Console\\Command\\Command->run()
+#28 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(1094): Illuminate\\Console\\Command->run()
+#29 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(342): Symfony\\Component\\Console\\Application->doRunCommand()
+#30 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(193): Symfony\\Component\\Console\\Application->doRun()
+#31 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#32 /var/www/html/Web-Scrapping-Backend/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle()
+#33 {main}
+"} 
+[2025-06-23 14:50:52] local.INFO: Processing single review {"reviewId":5929} 
+[2025-06-23 14:50:52] local.INFO: Sending AI request: {"url":"http://10.58.38.218:30011/v1/completions","promptLength":1213} 
+[2025-06-23 14:50:52] local.INFO: AI response received: {"statusCode":200,"hasChoices":false,"hasText":false} 
+[2025-06-23 14:50:52] local.WARNING: No choices[0].text in response: {"responseKeys":[]} 
+[2025-06-23 14:50:52] local.WARNING: AI returned no content for single review {"reviewId":5929} 
+[2025-06-23 14:50:52] local.ERROR: Single review analysis failed {"reviewId":5929,"error":"AI returned no valid content"} 
+[2025-06-23 14:50:52] local.ERROR: Single review analysis permanently failed {"reviewId":5929,"userId":1,"error":"AI returned no valid content"} 
+[2025-06-23 14:50:52] local.ERROR: AI returned no valid content {"exception":"[object] (Exception(code: 0): AI returned no valid content at /var/www/html/Web-Scrapping-Backend/app/Jobs/ProcessSingleReviewAnalysis.php:126)
+[stacktrace]
+#0 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Jobs\\ProcessSingleReviewAnalysis->handle()
+#1 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#2 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#3 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#4 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#5 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(126): Illuminate\\Container\\Container->call()
+#6 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Bus\\Dispatcher->Illuminate\\Bus\\{closure}()
+#7 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#8 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(130): Illuminate\\Pipeline\\Pipeline->then()
+#9 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(126): Illuminate\\Bus\\Dispatcher->dispatchNow()
+#10 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Queue\\CallQueuedHandler->Illuminate\\Queue\\{closure}()
+#11 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#12 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(121): Illuminate\\Pipeline\\Pipeline->then()
+#13 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(69): Illuminate\\Queue\\CallQueuedHandler->dispatchThroughMiddleware()
+#14 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Jobs/Job.php(102): Illuminate\\Queue\\CallQueuedHandler->call()
+#15 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(442): Illuminate\\Queue\\Jobs\\Job->fire()
+#16 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(392): Illuminate\\Queue\\Worker->process()
+#17 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(178): Illuminate\\Queue\\Worker->runJob()
+#18 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#19 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#20 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#21 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#22 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#23 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#24 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#25 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(213): Illuminate\\Container\\Container->call()
+#26 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Command/Command.php(279): Illuminate\\Console\\Command->execute()
+#27 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(182): Symfony\\Component\\Console\\Command\\Command->run()
+#28 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(1094): Illuminate\\Console\\Command->run()
+#29 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(342): Symfony\\Component\\Console\\Application->doRunCommand()
+#30 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(193): Symfony\\Component\\Console\\Application->doRun()
+#31 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#32 /var/www/html/Web-Scrapping-Backend/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle()
+#33 {main}
+"} 
+[2025-06-23 14:50:58] local.INFO: Processing single review {"reviewId":5930} 
+[2025-06-23 14:50:58] local.INFO: Sending AI request: {"url":"http://10.58.38.218:30011/v1/completions","promptLength":1309} 
+[2025-06-23 14:50:58] local.INFO: AI response received: {"statusCode":200,"hasChoices":false,"hasText":false} 
+[2025-06-23 14:50:58] local.WARNING: No choices[0].text in response: {"responseKeys":[]} 
+[2025-06-23 14:50:58] local.WARNING: AI returned no content for single review {"reviewId":5930} 
+[2025-06-23 14:50:58] local.ERROR: Single review analysis failed {"reviewId":5930,"error":"AI returned no valid content"} 
+[2025-06-23 14:50:58] local.ERROR: Single review analysis permanently failed {"reviewId":5930,"userId":1,"error":"AI returned no valid content"} 
+[2025-06-23 14:50:58] local.ERROR: AI returned no valid content {"exception":"[object] (Exception(code: 0): AI returned no valid content at /var/www/html/Web-Scrapping-Backend/app/Jobs/ProcessSingleReviewAnalysis.php:126)
+[stacktrace]
+#0 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Jobs\\ProcessSingleReviewAnalysis->handle()
+#1 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#2 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#3 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#4 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#5 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(126): Illuminate\\Container\\Container->call()
+#6 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Bus\\Dispatcher->Illuminate\\Bus\\{closure}()
+#7 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#8 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(130): Illuminate\\Pipeline\\Pipeline->then()
+#9 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(126): Illuminate\\Bus\\Dispatcher->dispatchNow()
+#10 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Queue\\CallQueuedHandler->Illuminate\\Queue\\{closure}()
+#11 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#12 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(121): Illuminate\\Pipeline\\Pipeline->then()
+#13 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(69): Illuminate\\Queue\\CallQueuedHandler->dispatchThroughMiddleware()
+#14 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Jobs/Job.php(102): Illuminate\\Queue\\CallQueuedHandler->call()
+#15 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(442): Illuminate\\Queue\\Jobs\\Job->fire()
+#16 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(392): Illuminate\\Queue\\Worker->process()
+#17 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(178): Illuminate\\Queue\\Worker->runJob()
+#18 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#19 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#20 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#21 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#22 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#23 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#24 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#25 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(213): Illuminate\\Container\\Container->call()
+#26 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Command/Command.php(279): Illuminate\\Console\\Command->execute()
+#27 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(182): Symfony\\Component\\Console\\Command\\Command->run()
+#28 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(1094): Illuminate\\Console\\Command->run()
+#29 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(342): Symfony\\Component\\Console\\Application->doRunCommand()
+#30 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(193): Symfony\\Component\\Console\\Application->doRun()
+#31 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#32 /var/www/html/Web-Scrapping-Backend/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle()
+#33 {main}
+"} 
+[2025-06-23 14:51:05] local.INFO: Processing single review {"reviewId":5931} 
+[2025-06-23 14:51:05] local.INFO: Sending AI request: {"url":"http://10.58.38.218:30011/v1/completions","promptLength":1218} 
+[2025-06-23 14:51:05] local.INFO: AI response received: {"statusCode":200,"hasChoices":false,"hasText":false} 
+[2025-06-23 14:51:05] local.WARNING: No choices[0].text in response: {"responseKeys":[]} 
+[2025-06-23 14:51:05] local.WARNING: AI returned no content for single review {"reviewId":5931} 
+[2025-06-23 14:51:05] local.ERROR: Single review analysis failed {"reviewId":5931,"error":"AI returned no valid content"} 
+[2025-06-23 14:51:05] local.ERROR: Single review analysis permanently failed {"reviewId":5931,"userId":1,"error":"AI returned no valid content"} 
+[2025-06-23 14:51:05] local.ERROR: AI returned no valid content {"exception":"[object] (Exception(code: 0): AI returned no valid content at /var/www/html/Web-Scrapping-Backend/app/Jobs/ProcessSingleReviewAnalysis.php:126)
+[stacktrace]
+#0 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Jobs\\ProcessSingleReviewAnalysis->handle()
+#1 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#2 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#3 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#4 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#5 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(126): Illuminate\\Container\\Container->call()
+#6 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Bus\\Dispatcher->Illuminate\\Bus\\{closure}()
+#7 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#8 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Bus/Dispatcher.php(130): Illuminate\\Pipeline\\Pipeline->then()
+#9 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(126): Illuminate\\Bus\\Dispatcher->dispatchNow()
+#10 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(170): Illuminate\\Queue\\CallQueuedHandler->Illuminate\\Queue\\{closure}()
+#11 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(127): Illuminate\\Pipeline\\Pipeline->Illuminate\\Pipeline\\{closure}()
+#12 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(121): Illuminate\\Pipeline\\Pipeline->then()
+#13 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php(69): Illuminate\\Queue\\CallQueuedHandler->dispatchThroughMiddleware()
+#14 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Jobs/Job.php(102): Illuminate\\Queue\\CallQueuedHandler->call()
+#15 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(442): Illuminate\\Queue\\Jobs\\Job->fire()
+#16 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(392): Illuminate\\Queue\\Worker->process()
+#17 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Worker.php(178): Illuminate\\Queue\\Worker->runJob()
+#18 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(149): Illuminate\\Queue\\Worker->daemon()
+#19 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Queue/Console/WorkCommand.php(132): Illuminate\\Queue\\Console\\WorkCommand->runWorker()
+#20 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Illuminate\\Queue\\Console\\WorkCommand->handle()
+#21 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure}()
+#22 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure()
+#23 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod()
+#24 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call()
+#25 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(213): Illuminate\\Container\\Container->call()
+#26 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Command/Command.php(279): Illuminate\\Console\\Command->execute()
+#27 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(182): Symfony\\Component\\Console\\Command\\Command->run()
+#28 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(1094): Illuminate\\Console\\Command->run()
+#29 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(342): Symfony\\Component\\Console\\Application->doRunCommand()
+#30 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(193): Symfony\\Component\\Console\\Application->doRun()
+#31 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony\\Component\\Console\\Application->run()
+#32 /var/www/html/Web-Scrapping-Backend/artisan(35): Illuminate\\Foundation\\Console\\Kernel->handle()
+#33 {main}
+"} 
+[2025-06-23 14:51:05] local.INFO: Checking batch completion {"jobId":35,"completedCount":"0","requestCount":"5"} 
+[2025-06-23 14:51:05] local.INFO: Batch not yet complete, scheduling another check {"jobId":35,"completedCount":"0","requestCount":"5"} 
