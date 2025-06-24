@@ -1,10 +1,65 @@
-    public function sendRequest($prompt, $reviewText)
+[2025-06-24 13:54:23] local.INFO: Sending AI request: {"url":"http://10.58.38.218:30011/v1/completions","promptLength":971} 
+[2025-06-24 13:54:23] local.ERROR: Local AI API Request Failed: Undefined property: App\Jobs\TestLLama::$client  
+
+<?php
+
+namespace App\Jobs;
+
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
+use GuzzleHttp\Client;
+
+class TestLLama implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    /**
+     * Create a new job instance.
+     */
+    public function __construct()
     {
+        $this->client = new Client();
+    }
+
+    /**
+     * Execute the job.
+     */
+    public function handle(): void
+    {
+
+        $reviewText = "Etisalat is the worst company ever in everything";
+
+        $prompt = "Analyze the sentiment of the following review for these specific attributes:\n\n" .
+        "BRAND: etisalat\n" .
+        "CATEGORY: Telecom\n\n" .
+        "ATTRIBUTES TO ANALYZE:\n" .
+        "Generic: accessibility, appUsability, credibility, customerService, harassmentOrDiscrimination\n" .
+        "Category Specific: 5G network, bill payment options, internet \n\n" .
+        "INSTRUCTIONS:\n" .
+        "1. Read the review text carefully\n" .
+        "2. For each attribute, determine if the sentiment is Positive, Negative, or Neutral\n" .
+        "3. Return ONLY a JSON object in this EXACT format:\n\n" .
+        '{"generic_attributes":{"overallSentiment":"Positive","customerService":"Positive"},"category_specific_attributes":{"5G network":"Positive","loyaltyPrograms":"Neutral"}}' . "\n\n" .
+        "IMPORTANT RULES:\n" .
+        "- Use only: Positive, Negative, or Neutral\n" .
+        "- Return ONLY the JSON object\n" .
+        "- No additional text before or after the JSON\n" .
+        "- No explanations or descriptions\n" .
+        "- Do not repeat the JSON\n" .
+        "- Make sure JSON is valid and complete\n\n" .
+        "REVIEW TEXT TO ANALYZE:\n";
+
+
+        
         // Combine system prompt and user content into a single prompt
         $combinedPrompt = $prompt . "\n\nReview Text: " . $reviewText;
 
         $requestBody = [
-            'model' => $this->model,
+            'model' => '/mnt/data/llms/Llama-3.3-70B-Instruct',
             'prompt' => $combinedPrompt,
             'temperature' => 0.0,
             'top_p' => 0.95,
@@ -13,11 +68,11 @@
 
         try {
             Log::info('Sending AI request:', [
-                'url' => $this->apiUrl,
+                'url' => 'http://10.58.38.218:30011/v1/completions',
                 'promptLength' => strlen($combinedPrompt)
             ]);
 
-            $response = $this->client->post($this->apiUrl, [
+            $response = $this->client->post('http://10.58.38.218:30011/v1/completions', [
                 'headers' => [
                     'Content-Type' => 'application/json',
                 ],
@@ -45,7 +100,6 @@
                 
                 if (empty($rawContent)) {
                     Log::warning('AI returned empty text content');
-                    return null;
                 }
                 
                 Log::info('Raw AI content received:', [
@@ -53,49 +107,34 @@
                     'contentPreview' => substr($rawContent, 0, 100) . '...'
                 ]);
                 
-                $cleanedContent = $this->extractAndCleanJsonFromResponse($rawContent);
+                // $cleanedContent = $this->extractAndCleanJsonFromResponse($rawContent);
                 
-                return [
-                    'choices' => [
-                        [
-                            'message' => [
-                                'content' => $cleanedContent
-                            ]
-                        ]
-                    ]
-                ];
+                // return [
+                //     'choices' => [
+                //         [
+                //             'message' => [
+                //                 'content' => $rawContent
+                //             ]
+                //         ]
+                //     ]
+                // ];
+
+                Log::info($rawContent);
+
             } else {
                 Log::warning('No choices[0].text in response:', [
                     'responseKeys' => array_keys($responseBody ?? [])
                 ]);
-                return null;
             }
 
         } catch (\Exception $e) {
             Log::error('Local AI API Request Failed: ' . $e->getMessage());
-            return null;
         }
+
+
     }
 
-    public function sentimentAnalysisPrompt($brandDetails)
-    {
-        return "Analyze the sentiment of the following review for these specific attributes:\n\n" .
-            "BRAND: {$brandDetails['brandName']}\n" .
-            "CATEGORY: {$brandDetails['category']}\n\n" .
-            "ATTRIBUTES TO ANALYZE:\n" .
-            "Generic: {$brandDetails['genericAttributes']}\n" .
-            "Category Specific: {$brandDetails['categorySpecificAttributes']}\n\n" .
-            "INSTRUCTIONS:\n" .
-            "1. Read the review text carefully\n" .
-            "2. For each attribute, determine if the sentiment is Positive, Negative, or Neutral\n" .
-            "3. Return ONLY a JSON object in this EXACT format:\n\n" .
-            '{"generic_attributes":{"overallSentiment":"Positive","customerService":"Positive"},"category_specific_attributes":{"5G network":"Positive","loyaltyPrograms":"Neutral"}}' . "\n\n" .
-            "IMPORTANT RULES:\n" .
-            "- Use only: Positive, Negative, or Neutral\n" .
-            "- Return ONLY the JSON object\n" .
-            "- No additional text before or after the JSON\n" .
-            "- No explanations or descriptions\n" .
-            "- Do not repeat the JSON\n" .
-            "- Make sure JSON is valid and complete\n\n" .
-            "REVIEW TEXT TO ANALYZE:\n";
-    }
+
+
+
+}
