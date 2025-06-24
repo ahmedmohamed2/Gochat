@@ -1,126 +1,58 @@
 <?php
 
-namespace App\Jobs;
+namespace App\Services;
 
-use App\Events\NewSentimentEvent;
-use App\Http\Controllers\SentimentAssets\SentimentAssetsController;
-use App\Models\GenericAttribute;
-use App\Models\GoogleApp;
-use App\Models\GoogleReview;
-use App\Models\GoogleReviewSentiment;
-use App\Models\User;
-use App\Models\UserJob;
-use App\Notifications\GoogleSentiment;
-use App\Notifications\InsufficientTokensNotification;
-use App\Services\OpenAIConfig;
-use App\Services\OpenAIPrompt;
-use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldBeUnique;
-use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Foundation\Bus\Dispatchable;
-use Illuminate\Queue\InteractsWithQueue;
-use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Auth;
+use GuzzleHttp\Client;
 use Illuminate\Support\Facades\Log;
-use Yethee\Tiktoken\EncoderProvider;
 
-class ProcessGooglePlayAnalysis implements ShouldQueue
+class LlamaAPIService
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    protected $apiUrl;
+    protected $client;
 
-    public $timeout = 3600; // Timeout in seconds
-    protected $requestData;
-    protected $userId;
-    /**
-     * Create a new job instance.
-     */
-    public function __construct($requestData, $userId)
+    public function __construct()
     {
-        $this->requestData = $requestData;
-        $this->userId = $userId;
+        $this->apiUrl = env('LLAMA_API_URL', 'http://10.58.38.218:30011/v1/completions');
+        $this->client = new Client();
     }
 
     /**
-     * Execute the job.
+     * Sends a request to the local Llama API with a given prompt and review text.
+     *
+     * @param string $prompt
+     * @param string $reviewText
+     * @return array|null
      */
-    public function handle(): void
+    public function sendRequest($prompt, $reviewText)
     {
-        $validatedData = $this->requestData;
-        $user = User::find($this->userId);
+        // Combine prompt and review text for the completions endpoint
+        $combinedPrompt = "{$prompt}\n\nReview: {$reviewText}";
+
+        $requestBody = [
+            'model' => '/mnt/data/llms/Llama-3.3-70B-Instruct',
+            'prompt' => $combinedPrompt,
+            'temperature' => 0.1,
+            'top_p' => 0.95,
+            'max_tokens' => 100,
+        ];
 
         try {
-
-            // Save job details in `user_jobs`
-            $job = new UserJob([
-                'job_id'        => $this->job->getJobId(),
-                'status'        => 'processing', // or any initial status
-                'request_type'  => 'sentiment',
-                'request_count' => $validatedData['number_of_reviews'],
-                'completed_count' => 0, // set to 0 at the start
-                'user_id' => $user->id
+            $response = $this->client->post($this->apiUrl, [
+                'headers' => [
+                    'Content-Type' => 'application/json',
+                ],
+                'json' => $requestBody,
+                'curl' => [
+                    CURLOPT_NOPROXY => '10.58.38.218',
+                ],
             ]);
 
-            // Assuming this is associated with a GoogleApp
-            $googleApp = GoogleApp::find($validatedData['appId']);
-            $googleApp->jobs()->save($job); // Saving polymorphic relation
-            $jobId = $job->id;
+            $responseBody = json_decode($response->getBody()->getContents(), true);
 
-            if (!$user) {
-                Log::error('User not found', ['userId' => $this->userId]);
-                return;
-            }
-            $assets = new SentimentAssetsController();
-
-            $reviews = $assets->fetchReviews($validatedData['appId'], $validatedData['number_of_reviews'], "google");
-            
-            $brandDetails = $assets->getBrandDetails($validatedData['appId'], "google");
-
-            if (empty($brandDetails)) {
-                Log::error('App details not found', ['appId' => $validatedData['appId']]);
-                return;
-            }
-
-            $openAIPrompt = new OpenAIPrompt();
-            $prompt = $openAIPrompt->sentimentAnalysisPrompt($brandDetails);
-
-            $encoder = (new EncoderProvider())->getForModel('gpt-4o');
-
-            $assets->processMultipleReviews($encoder, $user, $reviews, $prompt, $brandDetails['brandId'], "google", $jobId);
-
-            // Update job details after processing
-            $job->update([
-                'status' => 'completed',  // Update the status to completed
-            ]);
-            
-
-            if ($user->user_token > 0) {
-                $user->notify(new GoogleSentiment ($brandDetails['brandName'], $brandDetails['brandId']));
-            }
-
-            broadcast(new NewSentimentEvent());
-
+            return $responseBody;
         } catch (\Exception $e) {
-            Log::error("Job failed: {$e->getMessage()}", [
-                'userId' => $this->userId,
-                'appId' => $validatedData['appId'] ?? null,
-                'exception' => $e,
-            ]);
-    
-            $job = UserJob::where('job_id', $this->job->getJobId())->first();
-            if ($job) {
-                $job->update([
-                    'status' => 'failed',
-                ]);
-            }
-
-            throw $e;
+            Log::error('Llama API Request Failed: ' . $e->getMessage());
+            return null;
         }
-
     }
-
-
-
-
-
 }
-
