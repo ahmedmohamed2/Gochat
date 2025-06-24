@@ -1,96 +1,116 @@
-public function singleGoogleReviewAnalysis($review_id, $app_id)
+[2025-06-24 18:32:51] local.INFO: API Response {"response":{"id":"cmpl-5cf80811ae6b4f4989a8a6cdd7968234","object":"text_completion","created":1750789965,"model":"/mnt/data/llms/Llama-3.3-70B-Instruct","choices":[{"index":0,"text":" service, good network coverage, good 5G network, good internet speed, good bill payment options, good app, good customer service, good reliability, good accessibility, good responsiveness, good credibility, good personalization, no harassment or discrimination, good loyalty programs, good security, good user experience, good overall experience, good pricing, e& is the best telecom company in UAE, I suggest they keep up the good work and improve their app usability, I use their postpaid plan and I am very happy with it. 
+
+```
 {
-    $user = User::find(Auth::user()->id);
-
-    // If the user is not found, redirect with error
-    if (!$user) {
-        return redirect("/google_app/{$app_id}")->with('error', 'User not found.');
-    }
-
-    $assets = new SentimentAssetsController();
-
-    // Fetch the review data based on brand_id and review id
-    $result = $assets->fetchReviewData($app_id, $review_id, "google");
-
-    // If no review data is found, redirect with error
-    if (!$result) {
-        return redirect("/google_app/{$app_id}")->with('error', 'Review data not found.');
-    }
-
-    // Generate the brand details for the prompt
-    $brandDetails = $assets->generateBrandDetailsArray($result);
-    $openAIPrompt = new OpenAIPrompt();
-    $prompt = $openAIPrompt->sentimentAnalysisPrompt($brandDetails);
-
-    // Calculate the input tokens to ensure the user has enough tokens
-    $inputTokens = $assets->calculateTokens($prompt, $result->text);
-
-    // Check if the user has sufficient tokens
-    if ($user->user_token < $inputTokens) {
-        Log::info('Insufficient tokens for user', ['userId' => $user->id]);
-        return redirect("/google_app/{$app_id}")->with('error', 'You have insufficient tokens to complete the sentiment analysis.');
-    }
-
-    // Initialize OpenAI Config and send request
-    $openAIConfig = new OpenAIConfig();
-    try {
-        // Send the prompt and review text to API for analysis
-        $response = $openAIConfig->sendRequest($prompt, $result->text);
-
-        // Log the full response for debugging
-        Log::info('API Response', ['response' => $response]);
-
-        // Check if the response is valid
-        if ($response && isset($response['choices'][0]['text'])) {
-            $responseText = $response['choices'][0]['text'];
-            
-            // Log the response text
-            Log::info('Response text', ['text' => $responseText]);
-            
-            // Process the content returned by API
-            $assets->processContent($responseText, $review_id, $inputTokens, $user, "google");
-        } else {
-            Log::warning('API returned no content', ['reviewId' => $review_id, 'response' => $response]);
-        }
-    } catch (\Exception $e) {
-        Log::error('Sentiment analysis processing error', ['error' => $e->getMessage()]);
-    }
-
-    // Notify the user of the sentiment analysis completion
-    $user->notify(new GoogleSentiment($result->app_name, $app_id));
-
-    // Redirect to the sentiment display page with success message
-    return redirect("/show-sentiment/{$review_id}")->with('success', 'Your analysis request has finished.');
+  \"generic_attributes\": {
+    \"overallSentiment\": \"Positive\",
+    \"customerService\": \"Positive\",
+    \"appUsability\": \"Neutral\",
+    \"pricing\": \"Positive\",
+    \"security\": \"Positive\",
+    \"userExperience\": \"Positive\",
+    \"reliability\": \"Positive\",
+    \"accessibility\": \"Positive\",
+    \"credibility\": \"Positive\",
+    \"responsiveness\": \"Positive\",
+    \"harassmentOrDiscrimination\": \"Negative\",
+    \"whatDidTheCustomerSuggest\": \"Improve app usability\",
+    \"whatProductDidTheCustomerMention\": \"Postpaid plan\"
+  },
+  \"category_specific_attributes\": {
+    \"5G network\": \"Positive\",
+    \"bill payment options\": \"Positive\",
+    \"internet\\/data speed\": \"Positive\",
+    \"loyaltyPrograms\": \"Positive\",
+    \"network coverage\": \"Positive\",
+    \"Personalization\": \"Positive\"
+  }
 }
+```","logprobs":null,"finish_reason":"stop","stop_reason":128001,"prompt_logprobs":null}],"usage":{"prompt_tokens":157,"total_tokens":464,"completion_tokens":307,"prompt_tokens_details":null}}} 
+[2025-06-24 18:32:51] local.INFO: Response text {"text":" service, good network coverage, good 5G network, good internet speed, good bill payment options, good app, good customer service, good reliability, good accessibility, good responsiveness, good credibility, good personalization, no harassment or discrimination, good loyalty programs, good security, good user experience, good overall experience, good pricing, e& is the best telecom company in UAE, I suggest they keep up the good work and improve their app usability, I use their postpaid plan and I am very happy with it. 
 
-
-
-
-
-public function processContent($content, $reviewId, $inputTokens, $user, $source, $jopID = null)
+```
 {
-    // Log the raw content for debugging
-    Log::info('Processing content', ['content' => $content, 'reviewId' => $reviewId]);
-    
-    $decodedContent = json_decode($content, true);
-    
-    // Check if JSON decoding failed
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        Log::error('JSON decode error', ['error' => json_last_error_msg(), 'content' => $content]);
-        return;
-    }
-    
-    $genericSentiment = $decodedContent['generic_attributes'] ?? null;
-    $categorySpecificSentiment = $decodedContent['category_specific_attributes'] ?? null;
-
-    if ($genericSentiment && $categorySpecificSentiment) {
-        // ... rest of your existing code
-    } else {
-        Log::warning('Missing parts of the sentiment analysis', [
-            'reviewId' => $reviewId,
-            'hasGeneric' => !is_null($genericSentiment),
-            'hasCategory' => !is_null($categorySpecificSentiment),
-            'decodedContent' => $decodedContent
-        ]);
-    }
+  \"generic_attributes\": {
+    \"overallSentiment\": \"Positive\",
+    \"customerService\": \"Positive\",
+    \"appUsability\": \"Neutral\",
+    \"pricing\": \"Positive\",
+    \"security\": \"Positive\",
+    \"userExperience\": \"Positive\",
+    \"reliability\": \"Positive\",
+    \"accessibility\": \"Positive\",
+    \"credibility\": \"Positive\",
+    \"responsiveness\": \"Positive\",
+    \"harassmentOrDiscrimination\": \"Negative\",
+    \"whatDidTheCustomerSuggest\": \"Improve app usability\",
+    \"whatProductDidTheCustomerMention\": \"Postpaid plan\"
+  },
+  \"category_specific_attributes\": {
+    \"5G network\": \"Positive\",
+    \"bill payment options\": \"Positive\",
+    \"internet\\/data speed\": \"Positive\",
+    \"loyaltyPrograms\": \"Positive\",
+    \"network coverage\": \"Positive\",
+    \"Personalization\": \"Positive\"
+  }
 }
+```"} 
+[2025-06-24 18:32:51] local.INFO: Processing content {"content":" service, good network coverage, good 5G network, good internet speed, good bill payment options, good app, good customer service, good reliability, good accessibility, good responsiveness, good credibility, good personalization, no harassment or discrimination, good loyalty programs, good security, good user experience, good overall experience, good pricing, e& is the best telecom company in UAE, I suggest they keep up the good work and improve their app usability, I use their postpaid plan and I am very happy with it. 
+
+```
+{
+  \"generic_attributes\": {
+    \"overallSentiment\": \"Positive\",
+    \"customerService\": \"Positive\",
+    \"appUsability\": \"Neutral\",
+    \"pricing\": \"Positive\",
+    \"security\": \"Positive\",
+    \"userExperience\": \"Positive\",
+    \"reliability\": \"Positive\",
+    \"accessibility\": \"Positive\",
+    \"credibility\": \"Positive\",
+    \"responsiveness\": \"Positive\",
+    \"harassmentOrDiscrimination\": \"Negative\",
+    \"whatDidTheCustomerSuggest\": \"Improve app usability\",
+    \"whatProductDidTheCustomerMention\": \"Postpaid plan\"
+  },
+  \"category_specific_attributes\": {
+    \"5G network\": \"Positive\",
+    \"bill payment options\": \"Positive\",
+    \"internet\\/data speed\": \"Positive\",
+    \"loyaltyPrograms\": \"Positive\",
+    \"network coverage\": \"Positive\",
+    \"Personalization\": \"Positive\"
+  }
+}
+```","reviewId":"5932"} 
+[2025-06-24 18:32:51] local.ERROR: JSON decode error {"error":"Syntax error","content":" service, good network coverage, good 5G network, good internet speed, good bill payment options, good app, good customer service, good reliability, good accessibility, good responsiveness, good credibility, good personalization, no harassment or discrimination, good loyalty programs, good security, good user experience, good overall experience, good pricing, e& is the best telecom company in UAE, I suggest they keep up the good work and improve their app usability, I use their postpaid plan and I am very happy with it. 
+
+```
+{
+  \"generic_attributes\": {
+    \"overallSentiment\": \"Positive\",
+    \"customerService\": \"Positive\",
+    \"appUsability\": \"Neutral\",
+    \"pricing\": \"Positive\",
+    \"security\": \"Positive\",
+    \"userExperience\": \"Positive\",
+    \"reliability\": \"Positive\",
+    \"accessibility\": \"Positive\",
+    \"credibility\": \"Positive\",
+    \"responsiveness\": \"Positive\",
+    \"harassmentOrDiscrimination\": \"Negative\",
+    \"whatDidTheCustomerSuggest\": \"Improve app usability\",
+    \"whatProductDidTheCustomerMention\": \"Postpaid plan\"
+  },
+  \"category_specific_attributes\": {
+    \"5G network\": \"Positive\",
+    \"bill payment options\": \"Positive\",
+    \"internet\\/data speed\": \"Positive\",
+    \"loyaltyPrograms\": \"Positive\",
+    \"network coverage\": \"Positive\",
+    \"Personalization\": \"Positive\"
+  }
+}
+```"} 
