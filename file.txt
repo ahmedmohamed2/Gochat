@@ -1,43 +1,18 @@
-public function processMultipleReviews($encoder, $user, $reviews, $prompt, $appId, $source, $jopID)
-{
-    $openAIConfig = new OpenAIConfig(); // Using your OpenAIConfig service
+CEO Report
 
-    // Loop through each review
-    foreach ($reviews as $review) {
+Analyze sentiments and themes from customer reviews.
 
-        // Token calculations
-        $systemMessageTokens = count($encoder->encode($prompt));
-        $userMessageTokens = count($encoder->encode($review->text));
-        $inputTokens = $systemMessageTokens + $userMessageTokens;
+Objective: As a customer insight analyst, analyse customer reviews to provide a strategic insight report for the CEO. Focus on understanding customer sentiments, identifying prevalent issues, and examining mentions of competitors.
 
-        // Check if the user has enough tokens
-        if ($user->user_token < $inputTokens) {
-            $user->notify(new InsufficientTokensNotification($appId));
-            Log::info('Insufficient tokens for user', ['userId' => $user->id, 'reviewId' => $review->id]);
-            continue; // Skip to the next review if tokens are insufficient
-        }
+Tasks:
 
-        try {
-            // Use the OpenAIConfig class to send the request
-            $response = $openAIConfig->sendRequest($prompt, $review->text);
+Analyze sentiments and themes from customer reviews.
+Highlight frequently mentioned issues and their impact on user experience.
+Detect and report on any mentions of competition, noting how the app compares.
 
-            // Log the full response for debugging
-            Log::info('API Response', ['response' => $response, 'reviewId' => $review->id]);
+Report Goals:
 
-            // Check if the response is valid (using 'text' for completions API)
-            if ($response && isset($response['choices'][0]['text'])) {
-                $responseText = $response['choices'][0]['text'];
-                
-                // Log the response text
-                Log::info('Response text', ['text' => $responseText, 'reviewId' => $review->id]);
-                
-                // Process the content returned by API
-                $this->processContent($responseText, $review->id, $inputTokens, $user, $source, $jopID);
-            } else {
-                Log::warning('API returned no content for review', ['reviewId' => $review->id, 'response' => $response]);
-            }
-        } catch (\Exception $e) {
-            Log::error('Sentiment analysis processing error', ['error' => $e->getMessage(), 'reviewId' => $review->id]);
-        }
-    }
-}
+Create a concise report offering a comprehensive view of customer feedback.
+Provide actionable insights and recommendations for improving the app.
+Delivery: Ensure the report is clear, engaging, and equipped with executive-level summaries to aid quick decision-making.
+NOTE: DO NOT PRINT ANY SYMBOLS OR HASHTAGS OR UNUSUAL CHARACTERS TO SEPERATE PARTS IN THE REPORT. Do it by formatting it like a report with titles and different font sizes.
