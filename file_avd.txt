@@ -1,6 +1,3 @@
-[2025-06-24 13:54:23] local.INFO: Sending AI request: {"url":"http://10.58.38.218:30011/v1/completions","promptLength":971} 
-[2025-06-24 13:54:23] local.ERROR: Local AI API Request Failed: Undefined property: App\Jobs\TestLLama::$client  
-
 <?php
 
 namespace App\Jobs;
@@ -22,7 +19,7 @@ class TestLLama implements ShouldQueue
      */
     public function __construct()
     {
-        $this->client = new Client();
+        // Don't create the client here - it can't be serialized
     }
 
     /**
@@ -30,6 +27,8 @@ class TestLLama implements ShouldQueue
      */
     public function handle(): void
     {
+        // Create the HTTP client inside the handle method
+        $client = new Client();
 
         $reviewText = "Etisalat is the worst company ever in everything";
 
@@ -53,8 +52,6 @@ class TestLLama implements ShouldQueue
         "- Make sure JSON is valid and complete\n\n" .
         "REVIEW TEXT TO ANALYZE:\n";
 
-
-        
         // Combine system prompt and user content into a single prompt
         $combinedPrompt = $prompt . "\n\nReview Text: " . $reviewText;
 
@@ -72,7 +69,7 @@ class TestLLama implements ShouldQueue
                 'promptLength' => strlen($combinedPrompt)
             ]);
 
-            $response = $this->client->post('http://10.58.38.218:30011/v1/completions', [
+            $response = $client->post('http://10.58.38.218:30011/v1/completions', [
                 'headers' => [
                     'Content-Type' => 'application/json',
                 ],
@@ -130,11 +127,5 @@ class TestLLama implements ShouldQueue
         } catch (\Exception $e) {
             Log::error('Local AI API Request Failed: ' . $e->getMessage());
         }
-
-
     }
-
-
-
-
 }
