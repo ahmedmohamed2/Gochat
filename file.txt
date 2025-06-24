@@ -1,38 +1,64 @@
-/**
- * Extract the first valid JSON object from the response
- */
-private function extractAndCompleteJson($content)
-{
-    // Find the first JSON object start
-    $startPos = strpos($content, '{');
-    if ($startPos === false) {
-        return null;
-    }
+    public function singleGoogleReviewAnalysis($review_id, $app_id)
+    {
+        $user = User::find(Auth::user()->id);
     
-    // Extract from the first { onwards
-    $jsonPart = substr($content, $startPos);
-    
-    // Find the first complete JSON object by counting braces
-    $braceCount = 0;
-    $length = strlen($jsonPart);
-    
-    for ($i = 0; $i < $length; $i++) {
-        if ($jsonPart[$i] === '{') {
-            $braceCount++;
-        } elseif ($jsonPart[$i] === '}') {
-            $braceCount--;
-            if ($braceCount === 0) {
-                // Found the first complete JSON object
-                $firstJson = substr($jsonPart, 0, $i + 1);
-                
-                // Test if it's valid JSON
-                $decoded = json_decode($firstJson, true);
-                if (json_last_error() === JSON_ERROR_NONE) {
-                    return $firstJson;
-                }
-            }
+        // If the user is not found, redirect with error
+        if (!$user) {
+            return redirect("/google_app/{$app_id}")->with('error', 'User not found.');
         }
-    }
     
-    return null;
-}
+        $assets = new SentimentAssetsController();
+    
+        // Fetch the review data based on brand_id and review id
+        $result = $assets->fetchReviewData($app_id, $review_id, "google");
+    
+        // If no review data is found, redirect with error
+        if (!$result) {
+            return redirect("/google_app/{$app_id}")->with('error', 'Review data not found.');
+        }
+    
+        // Generate the brand details for the prompt
+        $brandDetails = $assets->generateBrandDetailsArray($result);
+        $openAIPrompt = new OpenAIPrompt();
+        $prompt = $openAIPrompt->sentimentAnalysisPrompt($brandDetails);
+    
+        // Calculate the input tokens to ensure the user has enough tokens
+        $inputTokens = $assets->calculateTokens($prompt, $result->text);
+    
+        // Check if the user has sufficient tokens
+        if ($user->user_token < $inputTokens) {
+            Log::info('Insufficient tokens for user', ['userId' => $user->id]);
+            return redirect("/google_app/{$app_id}")->with('error', 'You have insufficient tokens to complete the sentiment analysis.');
+        }
+    
+        // Initialize OpenAI Config and send request
+        $openAIConfig = new OpenAIConfig();
+        try {
+            // Send the prompt and review text to API for analysis
+            $response = $openAIConfig->sendRequest($prompt, $result->text);
+    
+            // Log the full response for debugging
+            Log::info('API Response', ['response' => $response]);
+    
+            // Check if the response is valid
+            if ($response && isset($response['choices'][0]['text'])) {
+                $responseText = $response['choices'][0]['text'];
+                
+                // Log the response text
+                Log::info('Response text', ['text' => $responseText]);
+                
+                // Process the content returned by API
+                $assets->processContent($responseText, $review_id, $inputTokens, $user, "google");
+            } else {
+                Log::warning('API returned no content', ['reviewId' => $review_id, 'response' => $response]);
+            }
+        } catch (\Exception $e) {
+            Log::error('Sentiment analysis processing error', ['error' => $e->getMessage()]);
+        }
+    
+        // Notify the user of the sentiment analysis completion
+        $user->notify(new GoogleSentiment($result->app_name, $app_id));
+    
+        // Redirect to the sentiment display page with success message
+        return redirect("/show-sentiment/{$review_id}")->with('success', 'Your analysis request has finished.');
+    }
