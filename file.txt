@@ -58,9 +58,9 @@ class TestLLama implements ShouldQueue
         $requestBody = [
             'model' => '/mnt/data/llms/Llama-3.3-70B-Instruct',
             'prompt' => $combinedPrompt,
-            'temperature' => 0.0,
+            'temperature' => 0.1,  // Changed from 0.0 to 0.1 to match cURL
             'top_p' => 0.95,
-            'max_tokens' => 500,
+            'max_tokens' => 100,   // Changed from 500 to 100 to match cURL
         ];
 
         try {
@@ -75,8 +75,8 @@ class TestLLama implements ShouldQueue
                 ],
                 'json' => $requestBody,
                 'proxy' => [
-                    'http' => null,
-                    'https' => null,
+                    'http' => false,   // Changed from null to false to match --noproxy behavior
+                    'https' => false,  // Changed from null to false to match --noproxy behavior
                 ],
                 'timeout' => 300,
                 'connect_timeout' => 30,
