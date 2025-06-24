@@ -1,151 +1,72 @@
-<?php
+[2025-06-24 19:48:30] local.INFO: API Response {"response":{"id":"cmpl-e320ceebcbce4ef293a0910b32c01acc","object":"text_completion","created":1750794506,"model":"/mnt/data/llms/Llama-3.3-70B-Instruct","choices":[{"index":0,"text":" service and good internet speed, but the app is slow and the bill is high. I like the 5G network, it's fast. The customer service is helpful and they have a good loyalty program. The network coverage is good, but sometimes it's slow in my area. I don't like the personalization, it's not accurate. 
 
-namespace App\Services;
-
-class OpenAIPrompt
 {
-    /**
-     * Generates a sentiment analysis prompt based on brand details.
-     *
-     * @param array $brandDetails
-     * @return string
-     */
-    public function sentimentAnalysisPrompt($brandDetails)
-    {
-        return "Analyze the sentiment for the following brand attributes: " .
-            "Brand: {$brandDetails['brandName']}, Category: {$brandDetails['category']}, " .
-            "generic_attributes: {$brandDetails['genericAttributes']}, " .
-            "category_specific_attributes: {$brandDetails['categorySpecificAttributes']}. " .
-            "\n\nInstructions:\n" .
-            "1. Analyze ONLY the review text that follows\n" .
-            "2. Return ONLY a single JSON object\n" .
-            "3. Do NOT repeat the JSON\n" .
-            "4. Do NOT add any explanatory text before or after\n" .
-            "5. Do NOT use markdown formatting\n" .
-            "6. Start immediately with { and end with }\n\n" .
-            "Required JSON format:\n" .
-            "{\"generic_attributes\":{\"overallSentiment\":\"positive/negative/neutral\",...},\"category_specific_attributes\":{...}}\n\n" .
-            "Review to analyze:";
-    }
-}
+\"generic_attributes\": {
+\"overallSentiment\": \"neutral\",
+\"customerService\": \"positive\",
+\"appUsability\": \"negative\",
+\"pricing\": \"negative\",
+\"security\": \"neutral\",
+\"userExperience\": \"neutral\",
+\"reliability\": \"neutral\",
+\"accessibility\": \"neutral\",
+\"credibility\": \"neutral\",
+\"responsiveness\": \"positive\",
+\"harassmentOrDiscrimination\": \"neutral\",
+\"whatDidTheCustomerSuggest\": \"improve personalization\",
+\"whatProductDidTheCustomerMention\": \"5G network, app, loyalty program\"
+","logprobs":null,"finish_reason":"stop","stop_reason":"}","prompt_logprobs":null}],"usage":{"prompt_tokens":205,"total_tokens":398,"completion_tokens":193,"prompt_tokens_details":null}}} 
+[2025-06-24 19:48:30] local.INFO: Response text {"text":" service and good internet speed, but the app is slow and the bill is high. I like the 5G network, it's fast. The customer service is helpful and they have a good loyalty program. The network coverage is good, but sometimes it's slow in my area. I don't like the personalization, it's not accurate. 
 
-
-=============================================
-
-
-
-<?php
-
-namespace App\Services;
-
-use GuzzleHttp\Client;
-use Illuminate\Support\Facades\Log;
-
-class LlamaAPIService
 {
-    protected $apiUrl;
-    protected $client;
+\"generic_attributes\": {
+\"overallSentiment\": \"neutral\",
+\"customerService\": \"positive\",
+\"appUsability\": \"negative\",
+\"pricing\": \"negative\",
+\"security\": \"neutral\",
+\"userExperience\": \"neutral\",
+\"reliability\": \"neutral\",
+\"accessibility\": \"neutral\",
+\"credibility\": \"neutral\",
+\"responsiveness\": \"positive\",
+\"harassmentOrDiscrimination\": \"neutral\",
+\"whatDidTheCustomerSuggest\": \"improve personalization\",
+\"whatProductDidTheCustomerMention\": \"5G network, app, loyalty program\"
+"} 
+[2025-06-24 19:48:30] local.INFO: Processing content {"content":" service and good internet speed, but the app is slow and the bill is high. I like the 5G network, it's fast. The customer service is helpful and they have a good loyalty program. The network coverage is good, but sometimes it's slow in my area. I don't like the personalization, it's not accurate. 
 
-    public function __construct()
-    {
-        $this->apiUrl = env('LLAMA_API_URL', 'http://10.58.38.218:30011/v1/completions');
-        $this->client = new Client();
-    }
-
-    /**
-     * Sends a request to the local Llama API with a given prompt and review text.
-     *
-     * @param string $prompt
-     * @param string $reviewText
-     * @return array|null
-     */
-    public function sendRequest($prompt, $reviewText)
-    {
-        // Combine prompt and review text for the completions endpoint
-        $combinedPrompt = "{$prompt}\n\nReview: {$reviewText}";
-
-        $requestBody = [
-            'model' => '/mnt/data/llms/Llama-3.3-70B-Instruct',
-            'prompt' => $combinedPrompt,
-            'temperature' => 0.1,
-            'top_p' => 0.95,
-            'max_tokens' => 500,
-            'stop' => ['}', '\n\n'],
-        ];
-
-        try {
-            $response = $this->client->post($this->apiUrl, [
-                'headers' => [
-                    'Content-Type' => 'application/json',
-                ],
-                'json' => $requestBody,
-                'curl' => [
-                    CURLOPT_NOPROXY => '10.58.38.218',
-                ],
-            ]);
-
-            $responseBody = json_decode($response->getBody()->getContents(), true);
-
-            return $responseBody;
-        } catch (\Exception $e) {
-            Log::error('Llama API Request Failed: ' . $e->getMessage());
-            return null;
-        }
-    }
-}
-
-=============================================
-
-public function processContent($content, $reviewId, $inputTokens, $user, $source, $jopID = null)
 {
-    // Log the raw content for debugging
-    Log::info('Processing content', ['content' => $content, 'reviewId' => $reviewId]);
-    
-    // Clean the content - extract only the first JSON object
-    $cleanedContent = $this->extractFirstJson($content);
-    
-    if (!$cleanedContent) {
-        Log::error('No valid JSON found in response', ['content' => $content]);
-        return;
-    }
-    
-    $decodedContent = json_decode($cleanedContent, true);
-    
-    // Check if JSON decoding failed
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        Log::error('JSON decode error', ['error' => json_last_error_msg(), 'cleanedContent' => $cleanedContent]);
-        return;
-    }
-    
-    // ... rest of your existing code remains the same
-}
+\"generic_attributes\": {
+\"overallSentiment\": \"neutral\",
+\"customerService\": \"positive\",
+\"appUsability\": \"negative\",
+\"pricing\": \"negative\",
+\"security\": \"neutral\",
+\"userExperience\": \"neutral\",
+\"reliability\": \"neutral\",
+\"accessibility\": \"neutral\",
+\"credibility\": \"neutral\",
+\"responsiveness\": \"positive\",
+\"harassmentOrDiscrimination\": \"neutral\",
+\"whatDidTheCustomerSuggest\": \"improve personalization\",
+\"whatProductDidTheCustomerMention\": \"5G network, app, loyalty program\"
+","reviewId":"5932"} 
+[2025-06-24 19:48:30] local.ERROR: No valid JSON found in response {"content":" service and good internet speed, but the app is slow and the bill is high. I like the 5G network, it's fast. The customer service is helpful and they have a good loyalty program. The network coverage is good, but sometimes it's slow in my area. I don't like the personalization, it's not accurate. 
 
-/**
- * Extract the first valid JSON object from the response
- */
-private function extractFirstJson($content)
 {
-    // Find the first occurrence of {
-    $startPos = strpos($content, '{');
-    if ($startPos === false) {
-        return null;
-    }
-    
-    // Find the matching closing brace
-    $braceCount = 0;
-    $length = strlen($content);
-    
-    for ($i = $startPos; $i < $length; $i++) {
-        if ($content[$i] === '{') {
-            $braceCount++;
-        } elseif ($content[$i] === '}') {
-            $braceCount--;
-            if ($braceCount === 0) {
-                // Found the complete JSON object
-                return substr($content, $startPos, $i - $startPos + 1);
-            }
-        }
-    }
-    
-    return null;
-}
+\"generic_attributes\": {
+\"overallSentiment\": \"neutral\",
+\"customerService\": \"positive\",
+\"appUsability\": \"negative\",
+\"pricing\": \"negative\",
+\"security\": \"neutral\",
+\"userExperience\": \"neutral\",
+\"reliability\": \"neutral\",
+\"accessibility\": \"neutral\",
+\"credibility\": \"neutral\",
+\"responsiveness\": \"positive\",
+\"harassmentOrDiscrimination\": \"neutral\",
+\"whatDidTheCustomerSuggest\": \"improve personalization\",
+\"whatProductDidTheCustomerMention\": \"5G network, app, loyalty program\"
+"} 
