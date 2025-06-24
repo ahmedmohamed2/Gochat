@@ -1,1 +1,9 @@
-[2025-06-24 17:56:01] local.ERROR: Sentiment analysis processing error {"error":"Undefined array key \"message\""} 
+[2025-06-24 18:07:12] local.WARNING: Response---------------------- [{"id":"cmpl-c9e0649cd94842719d169de649a128b0","object":"text_completion","created":1750788429,"model":"/mnt/data/llms/Llama-3.3-70B-Instruct","choices":[{"index":0,"text":". I have been trying to get a new sim card for the last 3 days and no one is helping me. The app is also very slow and not user friendly. I am very disappointed with the service. The internet speed is also very slow. I am paying a lot of money for this service and I expect a better service. I am thinking of switching to du. 
+
+{
+\"generic_attributes\": {
+\"overallSentiment\": \"negative\",
+\"customerService\": \"negative\",
+\"app","logprobs":null,"finish_reason":"length","stop_reason":null,"prompt_logprobs":null}],"usage":{"prompt_tokens":167,"total_tokens":267,"completion_tokens":100,"prompt_tokens_details":null}}] 
+[2025-06-24 18:07:12] local.WARNING: Missing parts of the sentiment analysis {"reviewId":"5933"} 
+
