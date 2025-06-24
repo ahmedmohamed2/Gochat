@@ -1,116 +1,26 @@
-[2025-06-24 18:32:51] local.INFO: API Response {"response":{"id":"cmpl-5cf80811ae6b4f4989a8a6cdd7968234","object":"text_completion","created":1750789965,"model":"/mnt/data/llms/Llama-3.3-70B-Instruct","choices":[{"index":0,"text":" service, good network coverage, good 5G network, good internet speed, good bill payment options, good app, good customer service, good reliability, good accessibility, good responsiveness, good credibility, good personalization, no harassment or discrimination, good loyalty programs, good security, good user experience, good overall experience, good pricing, e& is the best telecom company in UAE, I suggest they keep up the good work and improve their app usability, I use their postpaid plan and I am very happy with it. 
+<?php
 
-```
-{
-  \"generic_attributes\": {
-    \"overallSentiment\": \"Positive\",
-    \"customerService\": \"Positive\",
-    \"appUsability\": \"Neutral\",
-    \"pricing\": \"Positive\",
-    \"security\": \"Positive\",
-    \"userExperience\": \"Positive\",
-    \"reliability\": \"Positive\",
-    \"accessibility\": \"Positive\",
-    \"credibility\": \"Positive\",
-    \"responsiveness\": \"Positive\",
-    \"harassmentOrDiscrimination\": \"Negative\",
-    \"whatDidTheCustomerSuggest\": \"Improve app usability\",
-    \"whatProductDidTheCustomerMention\": \"Postpaid plan\"
-  },
-  \"category_specific_attributes\": {
-    \"5G network\": \"Positive\",
-    \"bill payment options\": \"Positive\",
-    \"internet\\/data speed\": \"Positive\",
-    \"loyaltyPrograms\": \"Positive\",
-    \"network coverage\": \"Positive\",
-    \"Personalization\": \"Positive\"
-  }
-}
-```","logprobs":null,"finish_reason":"stop","stop_reason":128001,"prompt_logprobs":null}],"usage":{"prompt_tokens":157,"total_tokens":464,"completion_tokens":307,"prompt_tokens_details":null}}} 
-[2025-06-24 18:32:51] local.INFO: Response text {"text":" service, good network coverage, good 5G network, good internet speed, good bill payment options, good app, good customer service, good reliability, good accessibility, good responsiveness, good credibility, good personalization, no harassment or discrimination, good loyalty programs, good security, good user experience, good overall experience, good pricing, e& is the best telecom company in UAE, I suggest they keep up the good work and improve their app usability, I use their postpaid plan and I am very happy with it. 
+namespace App\Services;
 
-```
+class OpenAIPrompt
 {
-  \"generic_attributes\": {
-    \"overallSentiment\": \"Positive\",
-    \"customerService\": \"Positive\",
-    \"appUsability\": \"Neutral\",
-    \"pricing\": \"Positive\",
-    \"security\": \"Positive\",
-    \"userExperience\": \"Positive\",
-    \"reliability\": \"Positive\",
-    \"accessibility\": \"Positive\",
-    \"credibility\": \"Positive\",
-    \"responsiveness\": \"Positive\",
-    \"harassmentOrDiscrimination\": \"Negative\",
-    \"whatDidTheCustomerSuggest\": \"Improve app usability\",
-    \"whatProductDidTheCustomerMention\": \"Postpaid plan\"
-  },
-  \"category_specific_attributes\": {
-    \"5G network\": \"Positive\",
-    \"bill payment options\": \"Positive\",
-    \"internet\\/data speed\": \"Positive\",
-    \"loyaltyPrograms\": \"Positive\",
-    \"network coverage\": \"Positive\",
-    \"Personalization\": \"Positive\"
-  }
+    /**
+     * Generates a sentiment analysis prompt based on brand details.
+     *
+     * @param array $brandDetails
+     * @return string
+     */
+    public function sentimentAnalysisPrompt($brandDetails)
+    {
+        return "You act as a sentiment analyzer for the following brand and its attributes: " .
+            "Brand: {$brandDetails['brandName']}, Category: {$brandDetails['category']}, " .
+            "generic_attributes: {$brandDetails['genericAttributes']}, " .
+            "category_specific_attributes: {$brandDetails['categorySpecificAttributes']}. " .
+            "Reply with the sentiment analysis for each attribute from the following review. " .
+            "Answer should be in a JSON format including generic_attributes and category_specific_attributes. " .
+            "CRITICAL: You must respond with ONLY the JSON object. Do not include any explanatory text, " .
+            "do not use markdown code blocks (```), do not add any prefixes or suffixes. " .
+            "Start your response directly with { and end with }. " .
+            "Example format: {\"generic_attributes\":{...},\"category_specific_attributes\":{...}}";
+    }
 }
-```"} 
-[2025-06-24 18:32:51] local.INFO: Processing content {"content":" service, good network coverage, good 5G network, good internet speed, good bill payment options, good app, good customer service, good reliability, good accessibility, good responsiveness, good credibility, good personalization, no harassment or discrimination, good loyalty programs, good security, good user experience, good overall experience, good pricing, e& is the best telecom company in UAE, I suggest they keep up the good work and improve their app usability, I use their postpaid plan and I am very happy with it. 
-
-```
-{
-  \"generic_attributes\": {
-    \"overallSentiment\": \"Positive\",
-    \"customerService\": \"Positive\",
-    \"appUsability\": \"Neutral\",
-    \"pricing\": \"Positive\",
-    \"security\": \"Positive\",
-    \"userExperience\": \"Positive\",
-    \"reliability\": \"Positive\",
-    \"accessibility\": \"Positive\",
-    \"credibility\": \"Positive\",
-    \"responsiveness\": \"Positive\",
-    \"harassmentOrDiscrimination\": \"Negative\",
-    \"whatDidTheCustomerSuggest\": \"Improve app usability\",
-    \"whatProductDidTheCustomerMention\": \"Postpaid plan\"
-  },
-  \"category_specific_attributes\": {
-    \"5G network\": \"Positive\",
-    \"bill payment options\": \"Positive\",
-    \"internet\\/data speed\": \"Positive\",
-    \"loyaltyPrograms\": \"Positive\",
-    \"network coverage\": \"Positive\",
-    \"Personalization\": \"Positive\"
-  }
-}
-```","reviewId":"5932"} 
-[2025-06-24 18:32:51] local.ERROR: JSON decode error {"error":"Syntax error","content":" service, good network coverage, good 5G network, good internet speed, good bill payment options, good app, good customer service, good reliability, good accessibility, good responsiveness, good credibility, good personalization, no harassment or discrimination, good loyalty programs, good security, good user experience, good overall experience, good pricing, e& is the best telecom company in UAE, I suggest they keep up the good work and improve their app usability, I use their postpaid plan and I am very happy with it. 
-
-```
-{
-  \"generic_attributes\": {
-    \"overallSentiment\": \"Positive\",
-    \"customerService\": \"Positive\",
-    \"appUsability\": \"Neutral\",
-    \"pricing\": \"Positive\",
-    \"security\": \"Positive\",
-    \"userExperience\": \"Positive\",
-    \"reliability\": \"Positive\",
-    \"accessibility\": \"Positive\",
-    \"credibility\": \"Positive\",
-    \"responsiveness\": \"Positive\",
-    \"harassmentOrDiscrimination\": \"Negative\",
-    \"whatDidTheCustomerSuggest\": \"Improve app usability\",
-    \"whatProductDidTheCustomerMention\": \"Postpaid plan\"
-  },
-  \"category_specific_attributes\": {
-    \"5G network\": \"Positive\",
-    \"bill payment options\": \"Positive\",
-    \"internet\\/data speed\": \"Positive\",
-    \"loyaltyPrograms\": \"Positive\",
-    \"network coverage\": \"Positive\",
-    \"Personalization\": \"Positive\"
-  }
-}
-```"} 
