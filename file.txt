@@ -1,142 +1,207 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Jobs;
 
 use App\Services\OpenAIConfig;
-use Illuminate\Http\Request;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
-class SentimentTestController extends Controller
+class ProcessSentimentAnalysisJob implements ShouldQueue
 {
-    protected $openAIConfig;
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public function __construct(OpenAIConfig $openAIConfig)
+    protected $brandDetails;
+    protected $reviewText;
+    protected $jobId;
+
+    public function __construct($brandDetails, $reviewText, $jobId = null)
     {
-        $this->openAIConfig = $openAIConfig;
+        $this->brandDetails = $brandDetails;
+        $this->reviewText = $reviewText;
+        $this->jobId = $jobId ?? uniqid('sentiment_');
     }
 
+    public function handle(OpenAIConfig $openAIConfig)
+    {
+        try {
+            Log::info('Starting sentiment analysis job', [
+                'job_id' => $this->jobId,
+                'brand' => $this->brandDetails['brandName'],
+                'review_length' => strlen($this->reviewText)
+            ]);
+
+            // Generate the prompt
+            $prompt = $openAIConfig->sentimentAnalysisPrompt($this->brandDetails);
+            
+            // Send request to AI
+            $response = $openAIConfig->sendRequest($prompt, $this->reviewText);
+
+            if ($response && isset($response['choices'][0]['message']['content'])) {
+                $sentimentResult = $response['choices'][0]['message']['content'];
+                
+                // Try to decode JSON
+                $decodedResult = json_decode($sentimentResult, true);
+                
+                $result = [
+                    'job_id' => $this->jobId,
+                    'status' => 'completed',
+                    'brand' => $this->brandDetails['brandName'],
+                    'category' => $this->brandDetails['category'],
+                    'review_text' => $this->reviewText,
+                    'sentiment_analysis' => $decodedResult ?? $sentimentResult,
+                    'raw_response' => $sentimentResult,
+                    'processed_at' => now()->toISOString(),
+                    'success' => json_last_error() === JSON_ERROR_NONE
+                ];
+
+                // Store result in a file (you could also use database)
+                Storage::put("sentiment_results/{$this->jobId}.json", json_encode($result, JSON_PRETTY_PRINT));
+
+                Log::info('Sentiment analysis job completed successfully', [
+                    'job_id' => $this->jobId,
+                    'result_valid_json' => json_last_error() === JSON_ERROR_NONE
+                ]);
+
+            } else {
+                $this->handleFailure('No valid response from AI service');
+            }
+
+        } catch (\Exception $e) {
+            $this->handleFailure($e->getMessage(), $e);
+        }
+    }
+
+    private function handleFailure($message, $exception = null)
+    {
+        $result = [
+            'job_id' => $this->jobId,
+            'status' => 'failed',
+            'brand' => $this->brandDetails['brandName'],
+            'error_message' => $message,
+            'failed_at' => now()->toISOString()
+        ];
+
+        Storage::put("sentiment_results/{$this->jobId}.json", json_encode($result, JSON_PRETTY_PRINT));
+
+        Log::error('Sentiment analysis job failed', [
+            'job_id' => $this->jobId,
+            'error' => $message,
+            'exception' => $exception ? $exception->getTraceAsString() : null
+        ]);
+
+        throw new \Exception("Sentiment analysis job failed: {$message}");
+    }
+
+    public function failed(\Exception $exception)
+    {
+        Log::error('Sentiment analysis job failed completely', [
+            'job_id' => $this->jobId,
+            'exception' => $exception->getMessage()
+        ]);
+    }
+}
+
+// Controller to dispatch the job
+namespace App\Http\Controllers;
+
+use App\Jobs\ProcessSentimentAnalysisJob;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+
+class SentimentJobController extends Controller
+{
     /**
-     * Test sentiment analysis without using a job
+     * Dispatch sentiment analysis job
      */
-    public function testSentimentDirect()
+    public function dispatchSentimentJob()
     {
         // Hardcoded brand details
         $brandDetails = [
-            'brandName' => 'Vodafone',
+            'brandName' => 'T-Mobile',
             'category' => 'Telecommunications',
-            'genericAttributes' => 'overallSentiment, customerService, userExperience',
-            'categorySpecificAttributes' => '5G network, network coverage, call quality, data speed'
+            'genericAttributes' => 'overallSentiment, customerService, userExperience, valueForMoney',
+            'categorySpecificAttributes' => '5G network, network coverage, roaming charges, plan flexibility'
         ];
 
         // Hardcoded review text
-        $reviewText = "The 5G network is amazing and super fast! Customer service was really helpful when I had issues. However, the network coverage in rural areas could be better. Overall, I'm quite satisfied with the service.";
+        $reviewText = "Great 5G speeds in the city! Customer service could be better though. The plans are reasonably priced and I love the international roaming options. Network coverage is excellent overall.";
+
+        $jobId = 'sentiment_' . uniqid();
 
         try {
-            // Generate the prompt
-            $prompt = $this->openAIConfig->sentimentAnalysisPrompt($brandDetails);
-            
-            Log::info('Testing sentiment analysis directly', [
-                'brand' => $brandDetails['brandName'],
-                'reviewLength' => strlen($reviewText)
-            ]);
-
-            // Send request to AI
-            $response = $this->openAIConfig->sendRequest($prompt, $reviewText);
-
-            if ($response && isset($response['choices'][0]['message']['content'])) {
-                $sentimentResult = $response['choices'][0]['message']['content'];
-                
-                // Try to decode JSON to validate
-                $decodedResult = json_decode($sentimentResult, true);
-                
-                if (json_last_error() === JSON_ERROR_NONE) {
-                    Log::info('Sentiment analysis completed successfully', [
-                        'result' => $decodedResult
-                    ]);
-                    
-                    return response()->json([
-                        'success' => true,
-                        'message' => 'Sentiment analysis completed',
-                        'brand' => $brandDetails['brandName'],
-                        'review' => $reviewText,
-                        'sentiment_result' => $decodedResult,
-                        'raw_response' => $sentimentResult
-                    ]);
-                } else {
-                    Log::warning('Invalid JSON response received', [
-                        'raw_response' => $sentimentResult
-                    ]);
-                    
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Invalid JSON response from AI',
-                        'raw_response' => $sentimentResult
-                    ], 422);
-                }
-            } else {
-                Log::error('No valid response from AI service');
-                
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No response from AI service'
-                ], 500);
-            }
-
-        } catch (\Exception $e) {
-            Log::error('Sentiment analysis failed', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
+            // Dispatch the job
+            ProcessSentimentAnalysisJob::dispatch($brandDetails, $reviewText, $jobId);
 
             return response()->json([
+                'success' => true,
+                'message' => 'Sentiment analysis job dispatched successfully',
+                'job_id' => $jobId,
+                'brand' => $brandDetails['brandName'],
+                'status_url' => route('sentiment.status', ['jobId' => $jobId])
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
                 'success' => false,
-                'message' => 'Sentiment analysis failed: ' . $e->getMessage()
+                'message' => 'Failed to dispatch job: ' . $e->getMessage()
             ], 500);
         }
     }
 
     /**
-     * Test with another example
+     * Check job status
      */
-    public function testSentimentNegative()
+    public function checkJobStatus($jobId)
     {
-        $brandDetails = [
-            'brandName' => 'Orange Telecom',
-            'category' => 'Telecommunications',
-            'genericAttributes' => 'overallSentiment, customerService, userExperience, valueForMoney',
-            'categorySpecificAttributes' => '5G network, network coverage, call quality, billing accuracy'
-        ];
-
-        $reviewText = "Terrible experience! The network keeps dropping calls and the 5G barely works. Customer service was rude and unhelpful. Way too expensive for such poor service quality. I'm switching providers soon.";
-
         try {
-            $prompt = $this->openAIConfig->sentimentAnalysisPrompt($brandDetails);
-            $response = $this->openAIConfig->sendRequest($prompt, $reviewText);
-
-            if ($response && isset($response['choices'][0]['message']['content'])) {
-                $sentimentResult = $response['choices'][0]['message']['content'];
-                $decodedResult = json_decode($sentimentResult, true);
-                
+            if (Storage::exists("sentiment_results/{$jobId}.json")) {
+                $result = json_decode(Storage::get("sentiment_results/{$jobId}.json"), true);
+                return response()->json($result);
+            } else {
                 return response()->json([
-                    'success' => true,
-                    'message' => 'Negative sentiment analysis completed',
-                    'brand' => $brandDetails['brandName'],
-                    'review' => $reviewText,
-                    'sentiment_result' => $decodedResult ?? $sentimentResult,
-                    'raw_response' => $sentimentResult
+                    'job_id' => $jobId,
+                    'status' => 'processing',
+                    'message' => 'Job is still being processed'
                 ]);
             }
-
-            return response()->json([
-                'success' => false,
-                'message' => 'No response from AI service'
-            ], 500);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error: ' . $e->getMessage()
+                'message' => 'Error checking job status: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Dispatch negative sentiment example
+     */
+    public function dispatchNegativeExample()
+    {
+        $brandDetails = [
+            'brandName' => 'Verizon',
+            'category' => 'Telecommunications',
+            'genericAttributes' => 'overallSentiment, customerService, userExperience, valueForMoney',
+            'categorySpecificAttributes' => '5G network, network coverage, billing accuracy, technical support'
+        ];
+
+        $reviewText = "Awful experience with Verizon! Bills are always wrong, customer service is useless, and the 5G network barely works. Way overpriced for terrible service. Technical support couldn't fix basic issues. Switching to another provider ASAP!";
+
+        $jobId = 'sentiment_negative_' . uniqid();
+
+        ProcessSentimentAnalysisJob::dispatch($brandDetails, $reviewText, $jobId);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Negative sentiment analysis job dispatched',
+            'job_id' => $jobId,
+            'brand' => $brandDetails['brandName'],
+            'status_url' => route('sentiment.status', ['jobId' => $jobId])
+        ]);
     }
 }
