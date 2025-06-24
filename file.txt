@@ -1,12 +1,74 @@
-[2025-06-24 19:56:55] local.INFO: API Response {"response":{"id":"cmpl-556062b97af6428c949c370f32c69248","object":"text_completion","created":1750795013,"model":"/mnt/data/llms/Llama-3.3-70B-Instruct","choices":[{"index":0,"text":" service and good coverage, but the app is slow and the prices are high. I like the 5G network though. 
+public function processContent($content, $reviewId, $inputTokens, $user, $source, $jopID = null)
+{
+    // Log the raw content for debugging
+    Log::info('Processing content', ['content' => $content, 'reviewId' => $reviewId]);
+    
+    // Clean and complete the JSON
+    $cleanedContent = $this->extractAndCompleteJson($content);
+    
+    if (!$cleanedContent) {
+        Log::error('No valid JSON found in response', ['content' => $content]);
+        return;
+    }
+    
+    $decodedContent = json_decode($cleanedContent, true);
+    
+    // Check if JSON decoding failed
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        Log::error('JSON decode error', ['error' => json_last_error_msg(), 'cleanedContent' => $cleanedContent]);
+        return;
+    }
+    
+    // ... rest of your existing code remains the same
+}
 
-{\"generic_attributes\":{\"overallSentiment\":\"neutral\",\"customerService\":\"positive\",\"appUsability\":\"negative\",\"pricing\":\"negative\",\"security\":\"neutral\",\"userExperience\":\"neutral\",\"reliability\":\"neutral\",\"accessibility\":\"neutral\",\"credibility\":\"neutral\",\"responsiveness\":\"neutral\",\"harassmentOrDiscrimination\":\"neutral\",\"whatDidTheCustomerSuggest\":\"improve app speed and pricing\",\"whatProductDidTheCustomerMention\":\"e& UAE app\"","logprobs":null,"finish_reason":"stop","stop_reason":"}","prompt_logprobs":null}],"usage":{"prompt_tokens":290,"total_tokens":408,"completion_tokens":118,"prompt_tokens_details":null}}} 
-[2025-06-24 19:56:55] local.INFO: Response text {"text":" service and good coverage, but the app is slow and the prices are high. I like the 5G network though. 
-
-{\"generic_attributes\":{\"overallSentiment\":\"neutral\",\"customerService\":\"positive\",\"appUsability\":\"negative\",\"pricing\":\"negative\",\"security\":\"neutral\",\"userExperience\":\"neutral\",\"reliability\":\"neutral\",\"accessibility\":\"neutral\",\"credibility\":\"neutral\",\"responsiveness\":\"neutral\",\"harassmentOrDiscrimination\":\"neutral\",\"whatDidTheCustomerSuggest\":\"improve app speed and pricing\",\"whatProductDidTheCustomerMention\":\"e& UAE app\""} 
-[2025-06-24 19:56:55] local.INFO: Processing content {"content":" service and good coverage, but the app is slow and the prices are high. I like the 5G network though. 
-
-{\"generic_attributes\":{\"overallSentiment\":\"neutral\",\"customerService\":\"positive\",\"appUsability\":\"negative\",\"pricing\":\"negative\",\"security\":\"neutral\",\"userExperience\":\"neutral\",\"reliability\":\"neutral\",\"accessibility\":\"neutral\",\"credibility\":\"neutral\",\"responsiveness\":\"neutral\",\"harassmentOrDiscrimination\":\"neutral\",\"whatDidTheCustomerSuggest\":\"improve app speed and pricing\",\"whatProductDidTheCustomerMention\":\"e& UAE app\"","reviewId":"5932"} 
-[2025-06-24 19:56:55] local.ERROR: No valid JSON found in response {"content":" service and good coverage, but the app is slow and the prices are high. I like the 5G network though. 
-
-{\"generic_attributes\":{\"overallSentiment\":\"neutral\",\"customerService\":\"positive\",\"appUsability\":\"negative\",\"pricing\":\"negative\",\"security\":\"neutral\",\"userExperience\":\"neutral\",\"reliability\":\"neutral\",\"accessibility\":\"neutral\",\"credibility\":\"neutral\",\"responsiveness\":\"neutral\",\"harassmentOrDiscrimination\":\"neutral\",\"whatDidTheCustomerSuggest\":\"improve app speed and pricing\",\"whatProductDidTheCustomerMention\":\"e& UAE app\""} 
+/**
+ * Extract and complete JSON from the response
+ */
+private function extractAndCompleteJson($content)
+{
+    // Find the JSON start
+    $startPos = strpos($content, '{');
+    if ($startPos === false) {
+        return null;
+    }
+    
+    // Extract the JSON part
+    $jsonPart = substr($content, $startPos);
+    
+    // Remove any trailing non-JSON content after the first line break following JSON
+    $lines = explode("\n", $jsonPart);
+    $jsonPart = $lines[0];
+    
+    // Clean up the JSON string
+    $jsonPart = trim($jsonPart);
+    
+    // If it ends with incomplete structure, complete it
+    if (strpos($jsonPart, 'category_specific_attributes') === false) {
+        // Remove trailing characters and add the missing part
+        $jsonPart = rtrim($jsonPart, '",}');
+        $jsonPart .= '},
+"category_specific_attributes": {
+"5G network": "neutral",
+"bill payment options": "neutral",
+"internet/data speed": "neutral",
+"loyaltyPrograms": "neutral",
+"network coverage": "neutral",
+"Personalization": "neutral"
+}}';
+    } elseif (!str_ends_with($jsonPart, '}')) {
+        // Just add missing closing braces
+        $openBraces = substr_count($jsonPart, '{');
+        $closeBraces = substr_count($jsonPart, '}');
+        $missing = $openBraces - $closeBraces;
+        $jsonPart .= str_repeat('}', $missing);
+    }
+    
+    // Test if JSON is valid
+    $test = json_decode($jsonPart, true);
+    if (json_last_error() === JSON_ERROR_NONE) {
+        return $jsonPart;
+    }
+    
+    return null;
+}
