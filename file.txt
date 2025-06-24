@@ -1,64 +1,43 @@
-public function singleAppleReviewAnalysis($review_id, $app_id)
+public function processMultipleReviews($encoder, $user, $reviews, $prompt, $appId, $source, $jopID)
 {
-    $user = User::find(Auth::user()->id);
+    $openAIConfig = new OpenAIConfig(); // Using your OpenAIConfig service
 
-    // If the user is not found, redirect with error
-    if (!$user) {
-        return redirect("/apple_app/{$app_id}")->with('error', 'User not found.');
-    }
+    // Loop through each review
+    foreach ($reviews as $review) {
 
-    $assets = new SentimentAssetsController();
+        // Token calculations
+        $systemMessageTokens = count($encoder->encode($prompt));
+        $userMessageTokens = count($encoder->encode($review->text));
+        $inputTokens = $systemMessageTokens + $userMessageTokens;
 
-    // Fetch the review data based on brand_id and review id
-    $result = $assets->fetchReviewData($app_id, $review_id, "apple");
-
-    // If no review data is found, redirect with error
-    if (!$result) {
-        return redirect("/apple_app/{$app_id}")->with('error', 'Review data not found.');
-    }
-
-    // Generate the brand details for the prompt
-    $brandDetails = $assets->generateBrandDetailsArray($result);
-    $openAIPrompt = new OpenAIPrompt();
-    $prompt = $openAIPrompt->sentimentAnalysisPrompt($brandDetails);
-
-    // Calculate the input tokens to ensure the user has enough tokens
-    $inputTokens = $assets->calculateTokens($prompt, $result->text);
-
-    // Check if the user has sufficient tokens
-    if ($user->user_token < $inputTokens) {
-        Log::info('Insufficient tokens for user', ['userId' => $user->id]);
-        return redirect("/apple_app/{$app_id}")->with('error', 'You have insufficient tokens to complete the sentiment analysis.');
-    }
-
-    // Initialize OpenAI Config and send request
-    $openAIConfig = new OpenAIConfig();
-    try {
-        // Send the prompt and review text to API for analysis
-        $response = $openAIConfig->sendRequest($prompt, $result->text);
-
-        // Log the full response for debugging
-        Log::info('API Response', ['response' => $response]);
-
-        // Check if the response is valid
-        if ($response && isset($response['choices'][0]['text'])) {
-            $responseText = $response['choices'][0]['text'];
-            
-            // Log the response text
-            Log::info('Response text', ['text' => $responseText]);
-            
-            // Process the content returned by API
-            $assets->processContent($responseText, $review_id, $inputTokens, $user, "apple");
-        } else {
-            Log::warning('API returned no content', ['reviewId' => $review_id, 'response' => $response]);
+        // Check if the user has enough tokens
+        if ($user->user_token < $inputTokens) {
+            $user->notify(new InsufficientTokensNotification($appId));
+            Log::info('Insufficient tokens for user', ['userId' => $user->id, 'reviewId' => $review->id]);
+            continue; // Skip to the next review if tokens are insufficient
         }
-    } catch (\Exception $e) {
-        Log::error('Sentiment analysis processing error', ['error' => $e->getMessage()]);
+
+        try {
+            // Use the OpenAIConfig class to send the request
+            $response = $openAIConfig->sendRequest($prompt, $review->text);
+
+            // Log the full response for debugging
+            Log::info('API Response', ['response' => $response, 'reviewId' => $review->id]);
+
+            // Check if the response is valid (using 'text' for completions API)
+            if ($response && isset($response['choices'][0]['text'])) {
+                $responseText = $response['choices'][0]['text'];
+                
+                // Log the response text
+                Log::info('Response text', ['text' => $responseText, 'reviewId' => $review->id]);
+                
+                // Process the content returned by API
+                $this->processContent($responseText, $review->id, $inputTokens, $user, $source, $jopID);
+            } else {
+                Log::warning('API returned no content for review', ['reviewId' => $review->id, 'response' => $response]);
+            }
+        } catch (\Exception $e) {
+            Log::error('Sentiment analysis processing error', ['error' => $e->getMessage(), 'reviewId' => $review->id]);
+        }
     }
-
-    // Notify the user of the sentiment analysis completion
-    $user->notify(new AppleSentiment($result->app_name, $app_id));
-
-    // Redirect to the sentiment display page with success message
-    return redirect("/show-apple-sentiment/{$review_id}")->with('success', 'Your analysis request has finished.');
 }
