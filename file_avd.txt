@@ -1,27 +1,216 @@
-[2025-06-23 15:35:20] local.ERROR: Namespace declaration statement has to be the very first statement or after any declare call in the script {"exception":"[object] (Symfony\\Component\\ErrorHandler\\Error\\FatalError(code: 0): Namespace declaration statement has to be the very first statement or after any declare call in the script at /var/www/html/Web-Scrapping-Backend/app/Services/OpenAIConfig.php:3)
-[stacktrace]
-#0 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/HandleExceptions.php(245): Symfony\\Component\\ErrorHandler\\Error\\FatalError->__construct(message: '...', code: '...', error: '...', traceOffset: '...', traceArgs: '...', trace: '...')
-#1 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/HandleExceptions.php(232): Illuminate\\Foundation\\Bootstrap\\HandleExceptions->fatalErrorFromPhpError(error: '...', traceOffset: '...')
-#2 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/HandleExceptions.php(256): Illuminate\\Foundation\\Bootstrap\\HandleExceptions->handleShutdown()
-#3 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/HandleExceptions.php(0): Illuminate\\Foundation\\Bootstrap\\HandleExceptions->Illuminate\\Foundation\\Bootstrap\\{closure:/var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Foundation/Bootstrap/HandleExceptions.php:255-257}()
-#4 /var/www/html/Web-Scrapping-Backend/vendor/composer/ClassLoader.php(427): Composer\\Autoload\\{closure:/var/www/html/Web-Scrapping-Backend/vendor/composer/ClassLoader.php:575-577}(file: '...')
-#5 /var/www/html/Web-Scrapping-Backend/app/Console/Commands/TestAiCommand.php(19): Composer\\Autoload\\ClassLoader->loadClass(class: '...')
-#6 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): App\\Console\\Commands\\TestAiCommand->handle()
-#7 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate\\Container\\BoundMethod::Illuminate\\Container\\{closure:/var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php:35-37}()
-#8 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(95): Illuminate\\Container\\Util::unwrapIfClosure(value: '...')
-#9 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate\\Container\\BoundMethod::callBoundMethod(container: '...', callback: '...', default: '...')
-#10 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Container/Container.php(694): Illuminate\\Container\\BoundMethod::call(container: '...', callback: '...', parameters: '...', defaultMethod: '...')
-#11 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(213): Illuminate\\Foundation\\Application->call(callback: '...', parameters: '...', defaultMethod: '...')
-#12 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Command/Command.php(279): App\\Console\\Commands\\TestAiCommand->execute(input: '...', output: '...')
-#13 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Console/Command.php(182): App\\Console\\Commands\\TestAiCommand->run(input: '...', output: '...')
-#14 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(1094): App\\Console\\Commands\\TestAiCommand->run(input: '...', output: '...')
-#15 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(342): Illuminate\\Console\\Application->doRunCommand(command: '...', input: '...', output: '...')
-#16 /var/www/html/Web-Scrapping-Backend/vendor/symfony/console/Application.php(193): Illuminate\\Console\\Application->doRun(input: '...', output: '...')
-#17 /var/www/html/Web-Scrapping-Backend/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Illuminate\\Console\\Application->run(input: '...', output: '...')
-#18 /var/www/html/Web-Scrapping-Backend/artisan(35): App\\Console\\Kernel->handle(input: '...', output: '...')
-#19 /var/www/html/Web-Scrapping-Backend/artisan(0): {main}()
-#20 {main}
-"} 
-[2025-06-23 15:55:22] local.INFO: Sending AI request: {"url":"http://10.58.38.218:30011/v1/completions","promptLength":854} 
-[2025-06-23 15:55:22] local.INFO: AI response received: {"statusCode":200,"hasChoices":false,"hasText":false} 
-[2025-06-23 15:55:22] local.WARNING: No choices[0].text in response: {"responseKeys":[]} 
+<?php
+
+namespace App\Services;
+
+use GuzzleHttp\Client;
+use Illuminate\Support\Facades\Log;
+
+class OpenAIConfig
+{
+    protected $apiUrl;
+    protected $client;
+    protected $model;
+
+    public function __construct()
+    {
+        // Use only the working endpoint
+        $this->apiUrl = env('LOCAL_AI_API_URL', 'http://10.58.38.218:30011/v1/completions');
+        $this->model = env('LOCAL_AI_MODEL', '/mnt/data/llms/Llama-3.3-70B-Instruct');
+        $this->client = new Client();
+    }
+
+    /**
+     * Sends a request to Local AI API with a given prompt and review.
+     *
+     * @param string $prompt
+     * @param string $reviewText
+     * @return array|null
+     */
+    public function sendRequest($prompt, $reviewText)
+    {
+        // Combine system prompt and user content into a single prompt
+        $combinedPrompt = $prompt . "\n\nReview Text: " . $reviewText;
+
+        $requestBody = [
+            'model' => $this->model,
+            'prompt' => $combinedPrompt,
+            'temperature' => 0.0,
+            'top_p' => 0.95,
+            'max_tokens' => 500,
+        ];
+
+        try {
+            Log::info('Sending AI request:', [
+                'url' => $this->apiUrl,
+                'promptLength' => strlen($combinedPrompt)
+            ]);
+
+            $response = $this->client->post($this->apiUrl, [
+                'headers' => [
+                    'Content-Type' => 'application/json',
+                ],
+                'json' => $requestBody,
+                'proxy' => [
+                    'http' => null,
+                    'https' => null,
+                ],
+                'timeout' => 300,
+                'connect_timeout' => 30,
+                'verify' => false,
+            ]);
+
+            $responseBody = json_decode($response->getBody()->getContents(), true);
+
+            Log::info('AI response received:', [
+                'statusCode' => $response->getStatusCode(),
+                'hasChoices' => isset($responseBody['choices']),
+                'hasText' => isset($responseBody['choices'][0]['text'])
+            ]);
+
+            // Extract the text from the response structure
+            if (isset($responseBody['choices'][0]['text'])) {
+                $rawContent = trim($responseBody['choices'][0]['text']);
+                
+                if (empty($rawContent)) {
+                    Log::warning('AI returned empty text content');
+                    return null;
+                }
+                
+                Log::info('Raw AI content received:', [
+                    'contentLength' => strlen($rawContent),
+                    'contentPreview' => substr($rawContent, 0, 100) . '...'
+                ]);
+                
+                $cleanedContent = $this->extractAndCleanJsonFromResponse($rawContent);
+                
+                return [
+                    'choices' => [
+                        [
+                            'message' => [
+                                'content' => $cleanedContent
+                            ]
+                        ]
+                    ]
+                ];
+            } else {
+                Log::warning('No choices[0].text in response:', [
+                    'responseKeys' => array_keys($responseBody ?? [])
+                ]);
+                return null;
+            }
+
+        } catch (\Exception $e) {
+            Log::error('Local AI API Request Failed: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Extract and clean JSON from the AI response
+     *
+     * @param string $rawResponse
+     * @return string
+     */
+    private function extractAndCleanJsonFromResponse($rawResponse)
+    {
+        // Find all JSON objects in the response
+        preg_match_all('/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/', $rawResponse, $matches);
+        
+        if (!empty($matches[0])) {
+            // Get the first complete JSON object
+            $jsonString = $matches[0][0];
+            
+            // Validate that it's proper JSON
+            $decoded = json_decode($jsonString, true);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                Log::info('Extracted valid JSON from response');
+                return $jsonString;
+            }
+        }
+
+        // If no valid JSON found, try to extract from lines containing JSON-like content
+        $lines = explode("\n", $rawResponse);
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if (strpos($line, '{') === 0 && strpos($line, '}') !== false) {
+                $decoded = json_decode($line, true);
+                if (json_last_error() === JSON_ERROR_NONE) {
+                    Log::info('Extracted JSON from line');
+                    return $line;
+                }
+            }
+        }
+
+        // If still no valid JSON, return a basic response based on the text
+        Log::warning('No valid JSON found, creating basic response');
+        return $this->createBasicSentimentResponse($rawResponse);
+    }
+
+    /**
+     * Create basic sentiment response when JSON extraction fails
+     *
+     * @param string $response
+     * @return string
+     */
+    private function createBasicSentimentResponse($response)
+    {
+        $responseLower = strtolower($response);
+        
+        // Determine overall sentiment
+        $overallSentiment = 'Neutral';
+        if (strpos($responseLower, 'good') !== false || 
+            strpos($responseLower, 'great') !== false || 
+            strpos($responseLower, 'excellent') !== false ||
+            strpos($responseLower, 'love') !== false) {
+            $overallSentiment = 'Positive';
+        } elseif (strpos($responseLower, 'bad') !== false || 
+                  strpos($responseLower, 'terrible') !== false || 
+                  strpos($responseLower, 'awful') !== false ||
+                  strpos($responseLower, 'hate') !== false) {
+            $overallSentiment = 'Negative';
+        }
+        
+        $result = [
+            'generic_attributes' => [
+                'overallSentiment' => $overallSentiment,
+                'customerService' => $overallSentiment,
+                'userExperience' => $overallSentiment
+            ],
+            'category_specific_attributes' => [
+                '5G network' => 'Neutral',
+                'network coverage' => 'Neutral'
+            ]
+        ];
+        
+        return json_encode($result);
+    }
+}
+
+    /**
+     * Generates a sentiment analysis prompt based on brand details.
+     *
+     * @param array $brandDetails
+     * @return string
+     */
+    public function sentimentAnalysisPrompt($brandDetails)
+    {
+        return "Analyze the sentiment of the following review for these specific attributes:\n\n" .
+            "BRAND: {$brandDetails['brandName']}\n" .
+            "CATEGORY: {$brandDetails['category']}\n\n" .
+            "ATTRIBUTES TO ANALYZE:\n" .
+            "Generic: {$brandDetails['genericAttributes']}\n" .
+            "Category Specific: {$brandDetails['categorySpecificAttributes']}\n\n" .
+            "INSTRUCTIONS:\n" .
+            "1. Read the review text carefully\n" .
+            "2. For each attribute, determine if the sentiment is Positive, Negative, or Neutral\n" .
+            "3. Return ONLY a JSON object in this EXACT format:\n\n" .
+            '{"generic_attributes":{"overallSentiment":"Positive","customerService":"Positive"},"category_specific_attributes":{"5G network":"Positive","loyaltyPrograms":"Neutral"}}' . "\n\n" .
+            "IMPORTANT RULES:\n" .
+            "- Use only: Positive, Negative, or Neutral\n" .
+            "- Return ONLY the JSON object\n" .
+            "- No additional text before or after the JSON\n" .
+            "- No explanations or descriptions\n" .
+            "- Do not repeat the JSON\n" .
+            "- Make sure JSON is valid and complete\n\n" .
+            "REVIEW TEXT TO ANALYZE:\n";
+    }
