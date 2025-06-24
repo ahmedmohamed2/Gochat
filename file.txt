@@ -1,85 +1,185 @@
-<?php
-
-namespace App\Services;
-
-use GuzzleHttp\Client;
-use Illuminate\Support\Facades\Log;
-
-class OpenAIConfig
-{
-    protected $apiKey;
-    protected $apiUrl;
-    protected $client;
-
-    public function __construct()
+    public function processContent($content, $reviewId, $inputTokens, $user, $source, $jopID = null)
     {
-        $this->apiKey = env('OPENAI_API_KEY');
-        $this->apiUrl = env('OPENAI_API_URL', 'https://api.openai.com/v1/chat/completions');
-        $this->client = new Client();
-    }
+        $decodedContent = json_decode($content, true);
+        $genericSentiment = $decodedContent['generic_attributes'] ?? null;
+        $categorySpecificSentiment = $decodedContent['category_specific_attributes'] ?? null;
+    
+        if ($genericSentiment && $categorySpecificSentiment) {
+            $provider = new EncoderProvider();
+            $encoder = $provider->getForModel('gpt-4-turbo');
+            $outputTokens = count($encoder->encode($content));
+    
+            if ($user->user_token < $outputTokens) {
+                Log::info('Insufficient tokens for user', ['userId' => $user->id]);
+                return redirect("/google_app/{$reviewId}")->with('error', 'You have insufficient tokens to complete the sentiment analysis.');
+            }
 
-    /**
-     * Sends a request to OpenAI API with a given prompt and review.
-     *
-     * @param string $prompt
-     * @param string $reviewText
-     * @return array|null
-     */
-    public function sendRequest($prompt, $reviewText)
-    {
-        $requestBody = [
-            'model' => 'gpt-4-turbo',
-            'messages' => [
-                ['role' => 'system', 'content' => $prompt],
-                ['role' => 'user', 'content' => $reviewText],
-            ],
-            'temperature' => 0.0,
-            'max_tokens' => 4096,
-        ];
+            $positiveAttributes = [];
+            $negativeAttributes = [];
 
-        try {
-            $response = $this->client->post($this->apiUrl, [
-                'headers' => [
-                    'Authorization' => "Bearer {$this->apiKey}",
-                    'Content-Type' => 'application/json',
-                ],
-                'json' => $requestBody,
-            ]);
+            foreach ($genericSentiment as $attribute => $value) {
+                $value = strtolower($value);
+                if ($value === 'positive') {
+                    $positiveAttributes[] = $attribute;
+                } elseif ($value === 'negative') {
+                    $negativeAttributes[] = $attribute;
+                }
+            }
 
-            $responseBody = json_decode($response->getBody()->getContents(), true);
+            foreach ($categorySpecificSentiment as $attribute => $value) {
+                $value = strtolower($value);
+                if ($value === 'positive') {
+                    $positiveAttributes[] = $attribute;
+                } elseif ($value === 'negative') {
+                    $negativeAttributes[] = $attribute;
+                }
+            }
 
-            return $responseBody;
-        } catch (\Exception $e) {
-            Log::error('OpenAI API Request Failed: ' . $e->getMessage());
-            return null;
+            $positiveString = implode(' ', $positiveAttributes);
+            $negativeString = implode(' ', $negativeAttributes);
+    
+            if ($source == "google")
+            {
+                if (!GoogleReviewSentiment::where('review_id', $reviewId)->exists()) {
+                    GoogleReviewSentiment::create([
+                        'sentiment_generic' => json_encode($genericSentiment),
+                        'sentiment_category_specific' => json_encode($categorySpecificSentiment),
+                        'positive_attributes' => $positiveString,
+                        'negative_attributes' => $negativeString,
+                        'review_id' => $reviewId,
+                    ]);
+                }
+
+            } else if ($source == "apple")
+            {
+                if (!AppleReviewSentiment::where('review_id', $reviewId)->exists()) {
+                    AppleReviewSentiment::create([
+                        'sentiment_generic' => json_encode($genericSentiment),
+                        'sentiment_category_specific' => json_encode($categorySpecificSentiment),
+                        'positive_attributes' => $positiveString,
+                        'negative_attributes' => $negativeString,
+                        'review_id' => $reviewId,
+                    ]);
+                }
+            }
+
+            if ($jopID !== null) {
+
+                $userJob = UserJob::find($jopID); // Find the specific job by ID
+    
+                if ($userJob) {
+                    $userJob->increment('completed_count'); // Increment the count
+                }
+
+            }
+
+            $user->user_token -= ($inputTokens + $outputTokens);
+            $user->save();
+        } else {
+            Log::warning('Missing parts of the sentiment analysis', ['reviewId' => $reviewId]);
         }
     }
-}
 
 
+================================================
+================================================
+================================================
 
-
-
-<?php
-
-namespace App\Services;
-
-class OpenAIPrompt
-{
-    /**
-     * Generates a sentiment analysis prompt based on brand details.
-     *
-     * @param array $brandDetails
-     * @return string
-     */
-    public function sentimentAnalysisPrompt($brandDetails)
+    public function processMultipleReviews($encoder, $user, $reviews, $prompt, $appId, $source, $jopID)
     {
-        return "You act as a sentiment analyzer for the following brand and its attributes: " .
-            "Brand: {$brandDetails['brandName']}, Category: {$brandDetails['category']}, " .
-            "generic_attributes: {$brandDetails['genericAttributes']}, " .
-            "category_specific_attributes: {$brandDetails['categorySpecificAttributes']}. " .
-            "Reply with the sentiment analysis for each attribute from the following review. " .
-            "Answer should be in a JSON format including generic_attributes and category_specific_attributes. " .
-            "Please reply with only JSON format without adding any other text.";
+        $openAIConfig = new OpenAIConfig(); // Using your OpenAIConfig service
+    
+        // Loop through each review
+        foreach ($reviews as $review) {
+    
+            // Token calculations
+            $systemMessageTokens = count($encoder->encode($prompt));
+            $userMessageTokens = count($encoder->encode($review->text));
+            $inputTokens = $systemMessageTokens + $userMessageTokens;
+    
+            // Check if the user has enough tokens
+            if ($user->user_token < $inputTokens) {
+                $user->notify(new InsufficientTokensNotification($appId));
+                Log::info('Insufficient tokens for user', ['userId' => $user->id, 'reviewId' => $review->id]);
+                continue; // Skip to the next review if tokens are insufficient
+            }
+    
+            try {
+                // Use the OpenAIConfig class to send the request
+                $response = $openAIConfig->sendRequest($prompt, $review->text);
+    
+                if ($response && isset($response['choices'][0]['message']['content'])) {
+                    $this->processContent($response['choices'][0]['message']['content'], $review->id, $inputTokens, $user, $source, $jopID);
+                } else {
+                    Log::warning('OpenAI returned no content for review', ['reviewId' => $review->id]);
+                }
+            } catch (\Exception $e) {
+                Log::error('Sentiment analysis processing error', ['error' => $e->getMessage(), 'reviewId' => $review->id]);
+            }
+        }
     }
-}
+
+
+================================================
+================================================
+================================================
+
+
+    public function singleGoogleReviewAnalysis($review_id, $app_id)
+    {
+        $user = User::find(Auth::user()->id);
+
+        // If the user is not found, redirect with error
+        if (!$user) {
+            return redirect("/google_app/{$app_id}")->with('error', 'User not found.');
+        }
+
+        $assets = new SentimentAssetsController();
+
+        // Fetch the review data based on brand_id and review id
+        $result = $assets->fetchReviewData($app_id, $review_id, "google");
+    
+        // If no review data is found, redirect with error
+        if (!$result) {
+            return redirect("/google_app/{$app_id}")->with('error', 'Review data not found.');
+        }
+    
+        // Generate the brand details for the prompt
+        $brandDetails = $assets->generateBrandDetailsArray($result); // Use an array instead of a string for better prompt formatting
+        $openAIPrompt = new OpenAIPrompt();
+        $prompt = $openAIPrompt->sentimentAnalysisPrompt($brandDetails);
+    
+        // Calculate the input tokens to ensure the user has enough tokens
+        $inputTokens = $assets->calculateTokens($prompt, $result->text);
+    
+        // Check if the user has sufficient tokens
+        if ($user->user_token < $inputTokens) {
+            Log::info('Insufficient tokens for user', ['userId' => $user->id]);
+            return redirect("/google_app/{$app_id}")->with('error', 'You have insufficient tokens to complete the sentiment analysis.');
+        }
+    
+        // Initialize OpenAI Config and send request
+        $openAIConfig = new OpenAIConfig();
+        try {
+            // Send the prompt and review text to OpenAI for analysis
+            $response = $openAIConfig->sendRequest($prompt, $result->text);
+    
+            // Check if the response is valid
+            if ($response) {
+                // Process the content returned by OpenAI
+                $assets->processContent($response['choices'][0]['message']['content'], $review_id, $inputTokens, $user, "google");
+            } else {
+                Log::warning('OpenAI returned no content', ['reviewId' => $review_id]);
+            }
+        } catch (\Exception $e) {
+            Log::error('Sentiment analysis processing error', ['error' => $e->getMessage()]);
+        }
+    
+        // Notify the user of the sentiment analysis completion
+        $user->notify(new GoogleSentiment($result->app_name, $app_id));
+    
+        // Redirect to the sentiment display page with success message
+        return redirect("/show-sentiment/{$review_id}")->with('success', 'Your analysis request has finished.');
+    }
+
+
