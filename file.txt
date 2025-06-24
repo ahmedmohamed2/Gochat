@@ -1,40 +1,38 @@
-[2025-06-24 20:03:15] local.INFO: API Response {"response":{"id":"cmpl-3ad1edb149d842fa83004e0fa5d54364","object":"text_completion","created":1750795383,"model":"/mnt/data/llms/Llama-3.3-70B-Instruct","choices":[{"index":0,"text":" service from e& UAE, their 5G network is fast and reliable. The app is user-friendly and the customer service is helpful. The pricing is a bit high but the loyalty programs are great. The network coverage is good and the personalization options are nice. 
-
-{\"generic_attributes\":{\"overallSentiment\":\"positive\",\"customerService\":\"positive\",\"appUsability\":\"positive\",\"pricing\":\"negative\",\"security\":\"neutral\",\"userExperience\":\"positive\",\"reliability\":\"positive\",\"accessibility\":\"neutral\",\"credibility\":\"neutral\",\"responsiveness\":\"positive\",\"harassmentOrDiscrimination\":\"neutral\",\"whatDidTheCustomerSuggest\":\"nothing\",\"whatProductDidTheCustomerMention\":\"e& UAE app\"},\"category_specific_attributes\":{\"5G network\":\"positive\",\"bill payment options\":\"neutral\",\"internet/data speed\":\"positive\",\"loyaltyPrograms\":\"positive\",\"network coverage\":\"positive\",\"Personalization\":\"positive\"}}```json
-{\"generic_attributes\":{\"overallSentiment\":\"positive\",\"customerService\":\"positive\",\"appUsability\":\"positive\",\"pricing\":\"negative\",\"security\":\"neutral\",\"userExperience\":\"positive\",\"reliability\":\"positive\",\"accessibility\":\"neutral\",\"credibility\":\"neutral\",\"responsiveness\":\"positive\",\"harassmentOrDiscrimination\":\"neutral\",\"whatDidTheCustomerSuggest\":\"nothing\",\"whatProductDidTheCustomerMention\":\"e& UAE app\"},\"category_specific_attributes\":{\"5G network\":\"positive\",\"bill payment options\":\"neutral\",\"internet/data speed\":\"positive\",\"loyaltyPrograms\":\"positive\",\"network coverage\":\"positive\",\"Personalization\":\"positive\"}}
-``````json
-{\"generic_attributes\":{\"overallSentiment\":\"positive\",\"customerService\":\"positive\",\"appUsability\":\"positive\",\"pricing\":\"negative\",\"security\":\"neutral\",\"userExperience\":\"positive\",\"reliability\":\"positive\",\"accessibility\":\"neutral\",\"credibility\":\"neutral\",\"responsiveness\":\"positive\",\"harassmentOrDiscrimination\":\"neutral\",\"whatDidTheCustomerSuggest\":\"nothing\",\"whatProductDidTheCustomerMention\":\"e& UAE app\"},\"category_specific_attributes\":{\"5G network\":\"positive\",\"bill payment options\":\"neutral\",\"internet/data speed\":\"positive\",\"loyaltyPrograms\":\"positive\",\"network coverage\":\"positive\",\"Personalization\":\"positive\"}}
-``````json
-{\"generic_attributes\":{\"overallSentiment\":\"positive\",\"customerService\":\"positive\",\"appUsability\":\"positive\",\"pricing\":\"negative\",\"security\":\"neutral\",\"userExperience\":\"positive\",\"reliability\":\"positive\",\"accessibility\":\"neutral\",\"credibility\":\"neutral\",\"responsiveness\":\"positive\",\"harassmentOrDiscrimination\":\"neutral\",\"whatDidTheCustomerSuggest\":\"nothing\",\"whatProductDidTheCustomerMention\":\"e& UAE app\"},\"category_specific_attributes\":{\"5G network\":\"positive\",\"bill payment options\":\"neutral\",\"internet/data speed\":\"positive\",\"loyaltyPrograms\":\"positive\",\"network coverage\":\"positive\",\"Personalization\":\"positive\"}}
-``````json
-{\"generic_attributes\":{\"overallSentiment\":\"positive\",\"customerService\":\"positive\",\"appUsability\":\"positive\",\"pricing\":\"negative\",\"security","logprobs":null,"finish_reason":"length","stop_reason":null,"prompt_logprobs":null}],"usage":{"prompt_tokens":290,"total_tokens":890,"completion_tokens":600,"prompt_tokens_details":null}}} 
-[2025-06-24 20:03:15] local.INFO: Response text {"text":" service from e& UAE, their 5G network is fast and reliable. The app is user-friendly and the customer service is helpful. The pricing is a bit high but the loyalty programs are great. The network coverage is good and the personalization options are nice. 
-
-{\"generic_attributes\":{\"overallSentiment\":\"positive\",\"customerService\":\"positive\",\"appUsability\":\"positive\",\"pricing\":\"negative\",\"security\":\"neutral\",\"userExperience\":\"positive\",\"reliability\":\"positive\",\"accessibility\":\"neutral\",\"credibility\":\"neutral\",\"responsiveness\":\"positive\",\"harassmentOrDiscrimination\":\"neutral\",\"whatDidTheCustomerSuggest\":\"nothing\",\"whatProductDidTheCustomerMention\":\"e& UAE app\"},\"category_specific_attributes\":{\"5G network\":\"positive\",\"bill payment options\":\"neutral\",\"internet/data speed\":\"positive\",\"loyaltyPrograms\":\"positive\",\"network coverage\":\"positive\",\"Personalization\":\"positive\"}}```json
-{\"generic_attributes\":{\"overallSentiment\":\"positive\",\"customerService\":\"positive\",\"appUsability\":\"positive\",\"pricing\":\"negative\",\"security\":\"neutral\",\"userExperience\":\"positive\",\"reliability\":\"positive\",\"accessibility\":\"neutral\",\"credibility\":\"neutral\",\"responsiveness\":\"positive\",\"harassmentOrDiscrimination\":\"neutral\",\"whatDidTheCustomerSuggest\":\"nothing\",\"whatProductDidTheCustomerMention\":\"e& UAE app\"},\"category_specific_attributes\":{\"5G network\":\"positive\",\"bill payment options\":\"neutral\",\"internet/data speed\":\"positive\",\"loyaltyPrograms\":\"positive\",\"network coverage\":\"positive\",\"Personalization\":\"positive\"}}
-``````json
-{\"generic_attributes\":{\"overallSentiment\":\"positive\",\"customerService\":\"positive\",\"appUsability\":\"positive\",\"pricing\":\"negative\",\"security\":\"neutral\",\"userExperience\":\"positive\",\"reliability\":\"positive\",\"accessibility\":\"neutral\",\"credibility\":\"neutral\",\"responsiveness\":\"positive\",\"harassmentOrDiscrimination\":\"neutral\",\"whatDidTheCustomerSuggest\":\"nothing\",\"whatProductDidTheCustomerMention\":\"e& UAE app\"},\"category_specific_attributes\":{\"5G network\":\"positive\",\"bill payment options\":\"neutral\",\"internet/data speed\":\"positive\",\"loyaltyPrograms\":\"positive\",\"network coverage\":\"positive\",\"Personalization\":\"positive\"}}
-``````json
-{\"generic_attributes\":{\"overallSentiment\":\"positive\",\"customerService\":\"positive\",\"appUsability\":\"positive\",\"pricing\":\"negative\",\"security\":\"neutral\",\"userExperience\":\"positive\",\"reliability\":\"positive\",\"accessibility\":\"neutral\",\"credibility\":\"neutral\",\"responsiveness\":\"positive\",\"harassmentOrDiscrimination\":\"neutral\",\"whatDidTheCustomerSuggest\":\"nothing\",\"whatProductDidTheCustomerMention\":\"e& UAE app\"},\"category_specific_attributes\":{\"5G network\":\"positive\",\"bill payment options\":\"neutral\",\"internet/data speed\":\"positive\",\"loyaltyPrograms\":\"positive\",\"network coverage\":\"positive\",\"Personalization\":\"positive\"}}
-``````json
-{\"generic_attributes\":{\"overallSentiment\":\"positive\",\"customerService\":\"positive\",\"appUsability\":\"positive\",\"pricing\":\"negative\",\"security"} 
-[2025-06-24 20:03:15] local.INFO: Processing content {"content":" service from e& UAE, their 5G network is fast and reliable. The app is user-friendly and the customer service is helpful. The pricing is a bit high but the loyalty programs are great. The network coverage is good and the personalization options are nice. 
-
-{\"generic_attributes\":{\"overallSentiment\":\"positive\",\"customerService\":\"positive\",\"appUsability\":\"positive\",\"pricing\":\"negative\",\"security\":\"neutral\",\"userExperience\":\"positive\",\"reliability\":\"positive\",\"accessibility\":\"neutral\",\"credibility\":\"neutral\",\"responsiveness\":\"positive\",\"harassmentOrDiscrimination\":\"neutral\",\"whatDidTheCustomerSuggest\":\"nothing\",\"whatProductDidTheCustomerMention\":\"e& UAE app\"},\"category_specific_attributes\":{\"5G network\":\"positive\",\"bill payment options\":\"neutral\",\"internet/data speed\":\"positive\",\"loyaltyPrograms\":\"positive\",\"network coverage\":\"positive\",\"Personalization\":\"positive\"}}```json
-{\"generic_attributes\":{\"overallSentiment\":\"positive\",\"customerService\":\"positive\",\"appUsability\":\"positive\",\"pricing\":\"negative\",\"security\":\"neutral\",\"userExperience\":\"positive\",\"reliability\":\"positive\",\"accessibility\":\"neutral\",\"credibility\":\"neutral\",\"responsiveness\":\"positive\",\"harassmentOrDiscrimination\":\"neutral\",\"whatDidTheCustomerSuggest\":\"nothing\",\"whatProductDidTheCustomerMention\":\"e& UAE app\"},\"category_specific_attributes\":{\"5G network\":\"positive\",\"bill payment options\":\"neutral\",\"internet/data speed\":\"positive\",\"loyaltyPrograms\":\"positive\",\"network coverage\":\"positive\",\"Personalization\":\"positive\"}}
-``````json
-{\"generic_attributes\":{\"overallSentiment\":\"positive\",\"customerService\":\"positive\",\"appUsability\":\"positive\",\"pricing\":\"negative\",\"security\":\"neutral\",\"userExperience\":\"positive\",\"reliability\":\"positive\",\"accessibility\":\"neutral\",\"credibility\":\"neutral\",\"responsiveness\":\"positive\",\"harassmentOrDiscrimination\":\"neutral\",\"whatDidTheCustomerSuggest\":\"nothing\",\"whatProductDidTheCustomerMention\":\"e& UAE app\"},\"category_specific_attributes\":{\"5G network\":\"positive\",\"bill payment options\":\"neutral\",\"internet/data speed\":\"positive\",\"loyaltyPrograms\":\"positive\",\"network coverage\":\"positive\",\"Personalization\":\"positive\"}}
-``````json
-{\"generic_attributes\":{\"overallSentiment\":\"positive\",\"customerService\":\"positive\",\"appUsability\":\"positive\",\"pricing\":\"negative\",\"security\":\"neutral\",\"userExperience\":\"positive\",\"reliability\":\"positive\",\"accessibility\":\"neutral\",\"credibility\":\"neutral\",\"responsiveness\":\"positive\",\"harassmentOrDiscrimination\":\"neutral\",\"whatDidTheCustomerSuggest\":\"nothing\",\"whatProductDidTheCustomerMention\":\"e& UAE app\"},\"category_specific_attributes\":{\"5G network\":\"positive\",\"bill payment options\":\"neutral\",\"internet/data speed\":\"positive\",\"loyaltyPrograms\":\"positive\",\"network coverage\":\"positive\",\"Personalization\":\"positive\"}}
-``````json
-{\"generic_attributes\":{\"overallSentiment\":\"positive\",\"customerService\":\"positive\",\"appUsability\":\"positive\",\"pricing\":\"negative\",\"security","reviewId":"5932"} 
-[2025-06-24 20:03:15] local.ERROR: No valid JSON found in response {"content":" service from e& UAE, their 5G network is fast and reliable. The app is user-friendly and the customer service is helpful. The pricing is a bit high but the loyalty programs are great. The network coverage is good and the personalization options are nice. 
-
-{\"generic_attributes\":{\"overallSentiment\":\"positive\",\"customerService\":\"positive\",\"appUsability\":\"positive\",\"pricing\":\"negative\",\"security\":\"neutral\",\"userExperience\":\"positive\",\"reliability\":\"positive\",\"accessibility\":\"neutral\",\"credibility\":\"neutral\",\"responsiveness\":\"positive\",\"harassmentOrDiscrimination\":\"neutral\",\"whatDidTheCustomerSuggest\":\"nothing\",\"whatProductDidTheCustomerMention\":\"e& UAE app\"},\"category_specific_attributes\":{\"5G network\":\"positive\",\"bill payment options\":\"neutral\",\"internet/data speed\":\"positive\",\"loyaltyPrograms\":\"positive\",\"network coverage\":\"positive\",\"Personalization\":\"positive\"}}```json
-{\"generic_attributes\":{\"overallSentiment\":\"positive\",\"customerService\":\"positive\",\"appUsability\":\"positive\",\"pricing\":\"negative\",\"security\":\"neutral\",\"userExperience\":\"positive\",\"reliability\":\"positive\",\"accessibility\":\"neutral\",\"credibility\":\"neutral\",\"responsiveness\":\"positive\",\"harassmentOrDiscrimination\":\"neutral\",\"whatDidTheCustomerSuggest\":\"nothing\",\"whatProductDidTheCustomerMention\":\"e& UAE app\"},\"category_specific_attributes\":{\"5G network\":\"positive\",\"bill payment options\":\"neutral\",\"internet/data speed\":\"positive\",\"loyaltyPrograms\":\"positive\",\"network coverage\":\"positive\",\"Personalization\":\"positive\"}}
-``````json
-{\"generic_attributes\":{\"overallSentiment\":\"positive\",\"customerService\":\"positive\",\"appUsability\":\"positive\",\"pricing\":\"negative\",\"security\":\"neutral\",\"userExperience\":\"positive\",\"reliability\":\"positive\",\"accessibility\":\"neutral\",\"credibility\":\"neutral\",\"responsiveness\":\"positive\",\"harassmentOrDiscrimination\":\"neutral\",\"whatDidTheCustomerSuggest\":\"nothing\",\"whatProductDidTheCustomerMention\":\"e& UAE app\"},\"category_specific_attributes\":{\"5G network\":\"positive\",\"bill payment options\":\"neutral\",\"internet/data speed\":\"positive\",\"loyaltyPrograms\":\"positive\",\"network coverage\":\"positive\",\"Personalization\":\"positive\"}}
-``````json
-{\"generic_attributes\":{\"overallSentiment\":\"positive\",\"customerService\":\"positive\",\"appUsability\":\"positive\",\"pricing\":\"negative\",\"security\":\"neutral\",\"userExperience\":\"positive\",\"reliability\":\"positive\",\"accessibility\":\"neutral\",\"credibility\":\"neutral\",\"responsiveness\":\"positive\",\"harassmentOrDiscrimination\":\"neutral\",\"whatDidTheCustomerSuggest\":\"nothing\",\"whatProductDidTheCustomerMention\":\"e& UAE app\"},\"category_specific_attributes\":{\"5G network\":\"positive\",\"bill payment options\":\"neutral\",\"internet/data speed\":\"positive\",\"loyaltyPrograms\":\"positive\",\"network coverage\":\"positive\",\"Personalization\":\"positive\"}}
-``````json
-{\"generic_attributes\":{\"overallSentiment\":\"positive\",\"customerService\":\"positive\",\"appUsability\":\"positive\",\"pricing\":\"negative\",\"security"} 
+/**
+ * Extract the first valid JSON object from the response
+ */
+private function extractAndCompleteJson($content)
+{
+    // Find the first JSON object start
+    $startPos = strpos($content, '{');
+    if ($startPos === false) {
+        return null;
+    }
+    
+    // Extract from the first { onwards
+    $jsonPart = substr($content, $startPos);
+    
+    // Find the first complete JSON object by counting braces
+    $braceCount = 0;
+    $length = strlen($jsonPart);
+    
+    for ($i = 0; $i < $length; $i++) {
+        if ($jsonPart[$i] === '{') {
+            $braceCount++;
+        } elseif ($jsonPart[$i] === '}') {
+            $braceCount--;
+            if ($braceCount === 0) {
+                // Found the first complete JSON object
+                $firstJson = substr($jsonPart, 0, $i + 1);
+                
+                // Test if it's valid JSON
+                $decoded = json_decode($firstJson, true);
+                if (json_last_error() === JSON_ERROR_NONE) {
+                    return $firstJson;
+                }
+            }
+        }
+    }
+    
+    return null;
+}
