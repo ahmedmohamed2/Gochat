@@ -1,133 +1,85 @@
 <?php
 
-namespace App\Jobs;
+namespace App\Services;
 
-use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Foundation\Bus\Dispatchable;
-use Illuminate\Queue\InteractsWithQueue;
-use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Log;
 use GuzzleHttp\Client;
+use Illuminate\Support\Facades\Log;
 
-class TestLLama implements ShouldQueue
+class OpenAIConfig
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    protected $apiKey;
+    protected $apiUrl;
+    protected $client;
 
-    /**
-     * Create a new job instance.
-     */
     public function __construct()
     {
-        // Don't create the client here - it can't be serialized
+        $this->apiKey = env('OPENAI_API_KEY');
+        $this->apiUrl = env('OPENAI_API_URL', 'https://api.openai.com/v1/chat/completions');
+        $this->client = new Client();
     }
 
     /**
-     * Execute the job.
+     * Sends a request to OpenAI API with a given prompt and review.
+     *
+     * @param string $prompt
+     * @param string $reviewText
+     * @return array|null
      */
-    public function handle(): void
+    public function sendRequest($prompt, $reviewText)
     {
-        // Create the HTTP client inside the handle method
-        $client = new Client();
-
-        $reviewText = "Etisalat is the worst company ever in everything";
-
-        $prompt = "Analyze the sentiment of the following review for these specific attributes:\n\n" .
-        "BRAND: etisalat\n" .
-        "CATEGORY: Telecom\n\n" .
-        "ATTRIBUTES TO ANALYZE:\n" .
-        "Generic: accessibility, appUsability, credibility, customerService, harassmentOrDiscrimination\n" .
-        "Category Specific: 5G network, bill payment options, internet \n\n" .
-        "INSTRUCTIONS:\n" .
-        "1. Read the review text carefully\n" .
-        "2. For each attribute, determine if the sentiment is Positive, Negative, or Neutral\n" .
-        "3. Return ONLY a JSON object in this EXACT format:\n\n" .
-        '{"generic_attributes":{"overallSentiment":"Positive","customerService":"Positive"},"category_specific_attributes":{"5G network":"Positive","loyaltyPrograms":"Neutral"}}' . "\n\n" .
-        "IMPORTANT RULES:\n" .
-        "- Use only: Positive, Negative, or Neutral\n" .
-        "- Return ONLY the JSON object\n" .
-        "- No additional text before or after the JSON\n" .
-        "- No explanations or descriptions\n" .
-        "- Do not repeat the JSON\n" .
-        "- Make sure JSON is valid and complete\n\n" .
-        "REVIEW TEXT TO ANALYZE:\n";
-
-        // Combine system prompt and user content into a single prompt
-        $combinedPrompt = $prompt . "\n\nReview Text: " . $reviewText;
-
         $requestBody = [
-            'model' => '/mnt/data/llms/Llama-3.3-70B-Instruct',
-            'prompt' => $combinedPrompt,
-            'temperature' => 0.1,  // Changed from 0.0 to 0.1 to match cURL
-            'top_p' => 0.95,
-            'max_tokens' => 100,   // Changed from 500 to 100 to match cURL
+            'model' => 'gpt-4-turbo',
+            'messages' => [
+                ['role' => 'system', 'content' => $prompt],
+                ['role' => 'user', 'content' => $reviewText],
+            ],
+            'temperature' => 0.0,
+            'max_tokens' => 4096,
         ];
 
         try {
-            Log::info('Sending AI request:', [
-                'url' => 'http://10.58.38.218:30011/v1/completions',
-                'promptLength' => strlen($combinedPrompt)
-            ]);
-
-            $response = $client->post('http://10.58.38.218:30011/v1/completions', [
+            $response = $this->client->post($this->apiUrl, [
                 'headers' => [
+                    'Authorization' => "Bearer {$this->apiKey}",
                     'Content-Type' => 'application/json',
                 ],
                 'json' => $requestBody,
-                'proxy' => [
-                    'http' => false,   // Changed from null to false to match --noproxy behavior
-                    'https' => false,  // Changed from null to false to match --noproxy behavior
-                ],
-                'timeout' => 300,
-                'connect_timeout' => 30,
-                'verify' => false,
             ]);
 
             $responseBody = json_decode($response->getBody()->getContents(), true);
 
-            Log::info("Response Body", [$responseBody]);
-
-            Log::info('AI response received:', [
-                'statusCode' => $response->getStatusCode(),
-                'hasChoices' => isset($responseBody['choices']),
-                'hasText' => isset($responseBody['choices'][0]['text'])
-            ]);
-
-            // Extract the text from the response structure
-            if (isset($responseBody['choices'][0]['text'])) {
-                $rawContent = trim($responseBody['choices'][0]['text']);
-                
-                if (empty($rawContent)) {
-                    Log::warning('AI returned empty text content');
-                }
-                
-                Log::info('Raw AI content received:', [
-                    'contentLength' => strlen($rawContent),
-                    'contentPreview' => substr($rawContent, 0, 100) . '...'
-                ]);
-                
-                // $cleanedContent = $this->extractAndCleanJsonFromResponse($rawContent);
-                
-                // return [
-                //     'choices' => [
-                //         [
-                //             'message' => [
-                //                 'content' => $rawContent
-                //             ]
-                //         ]
-                //     ]
-                // ];
-
-                Log::info($rawContent);
-
-            } else {
-                Log::warning('No choices[0].text in response:', [
-                    'responseKeys' => array_keys($responseBody ?? [])
-                ]);
-            }
-
+            return $responseBody;
         } catch (\Exception $e) {
-            Log::error('Local AI API Request Failed: ' . $e->getMessage());
+            Log::error('OpenAI API Request Failed: ' . $e->getMessage());
+            return null;
         }
+    }
+}
+
+
+
+
+
+<?php
+
+namespace App\Services;
+
+class OpenAIPrompt
+{
+    /**
+     * Generates a sentiment analysis prompt based on brand details.
+     *
+     * @param array $brandDetails
+     * @return string
+     */
+    public function sentimentAnalysisPrompt($brandDetails)
+    {
+        return "You act as a sentiment analyzer for the following brand and its attributes: " .
+            "Brand: {$brandDetails['brandName']}, Category: {$brandDetails['category']}, " .
+            "generic_attributes: {$brandDetails['genericAttributes']}, " .
+            "category_specific_attributes: {$brandDetails['categorySpecificAttributes']}. " .
+            "Reply with the sentiment analysis for each attribute from the following review. " .
+            "Answer should be in a JSON format including generic_attributes and category_specific_attributes. " .
+            "Please reply with only JSON format without adding any other text.";
     }
 }
