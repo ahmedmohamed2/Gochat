@@ -1,5 +1,11 @@
-curl -X POST http://10.58.38.218:30011/v1/completions   -H "Content-Type: application/json"   -d '{
-	"model": "/mnt/data/llms/Llama-3.3-70B-Instruct",
-	"prompt": "Hello, please respond with: I am working",
-	"temperature": 0.0
+
+
+curl --noproxy '10.58.38.218' --location --request POST 'http://10.58.38.218:30011/v1/completions' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+  "model": "/mnt/data/llms/Llama-3.3-70B-Instruct",
+  "prompt": "What are the most popular quantization techniques for LLMs?",
+  "temperature": 0.1,
+  "top_p": 0.95,
+  "max_tokens": 100
 }'
