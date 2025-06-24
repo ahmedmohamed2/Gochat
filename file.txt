@@ -1,72 +1,27 @@
-[2025-06-24 19:48:30] local.INFO: API Response {"response":{"id":"cmpl-e320ceebcbce4ef293a0910b32c01acc","object":"text_completion","created":1750794506,"model":"/mnt/data/llms/Llama-3.3-70B-Instruct","choices":[{"index":0,"text":" service and good internet speed, but the app is slow and the bill is high. I like the 5G network, it's fast. The customer service is helpful and they have a good loyalty program. The network coverage is good, but sometimes it's slow in my area. I don't like the personalization, it's not accurate. 
+<?php
 
-{
-\"generic_attributes\": {
-\"overallSentiment\": \"neutral\",
-\"customerService\": \"positive\",
-\"appUsability\": \"negative\",
-\"pricing\": \"negative\",
-\"security\": \"neutral\",
-\"userExperience\": \"neutral\",
-\"reliability\": \"neutral\",
-\"accessibility\": \"neutral\",
-\"credibility\": \"neutral\",
-\"responsiveness\": \"positive\",
-\"harassmentOrDiscrimination\": \"neutral\",
-\"whatDidTheCustomerSuggest\": \"improve personalization\",
-\"whatProductDidTheCustomerMention\": \"5G network, app, loyalty program\"
-","logprobs":null,"finish_reason":"stop","stop_reason":"}","prompt_logprobs":null}],"usage":{"prompt_tokens":205,"total_tokens":398,"completion_tokens":193,"prompt_tokens_details":null}}} 
-[2025-06-24 19:48:30] local.INFO: Response text {"text":" service and good internet speed, but the app is slow and the bill is high. I like the 5G network, it's fast. The customer service is helpful and they have a good loyalty program. The network coverage is good, but sometimes it's slow in my area. I don't like the personalization, it's not accurate. 
+namespace App\Services;
 
+class OpenAIPrompt
 {
-\"generic_attributes\": {
-\"overallSentiment\": \"neutral\",
-\"customerService\": \"positive\",
-\"appUsability\": \"negative\",
-\"pricing\": \"negative\",
-\"security\": \"neutral\",
-\"userExperience\": \"neutral\",
-\"reliability\": \"neutral\",
-\"accessibility\": \"neutral\",
-\"credibility\": \"neutral\",
-\"responsiveness\": \"positive\",
-\"harassmentOrDiscrimination\": \"neutral\",
-\"whatDidTheCustomerSuggest\": \"improve personalization\",
-\"whatProductDidTheCustomerMention\": \"5G network, app, loyalty program\"
-"} 
-[2025-06-24 19:48:30] local.INFO: Processing content {"content":" service and good internet speed, but the app is slow and the bill is high. I like the 5G network, it's fast. The customer service is helpful and they have a good loyalty program. The network coverage is good, but sometimes it's slow in my area. I don't like the personalization, it's not accurate. 
-
-{
-\"generic_attributes\": {
-\"overallSentiment\": \"neutral\",
-\"customerService\": \"positive\",
-\"appUsability\": \"negative\",
-\"pricing\": \"negative\",
-\"security\": \"neutral\",
-\"userExperience\": \"neutral\",
-\"reliability\": \"neutral\",
-\"accessibility\": \"neutral\",
-\"credibility\": \"neutral\",
-\"responsiveness\": \"positive\",
-\"harassmentOrDiscrimination\": \"neutral\",
-\"whatDidTheCustomerSuggest\": \"improve personalization\",
-\"whatProductDidTheCustomerMention\": \"5G network, app, loyalty program\"
-","reviewId":"5932"} 
-[2025-06-24 19:48:30] local.ERROR: No valid JSON found in response {"content":" service and good internet speed, but the app is slow and the bill is high. I like the 5G network, it's fast. The customer service is helpful and they have a good loyalty program. The network coverage is good, but sometimes it's slow in my area. I don't like the personalization, it's not accurate. 
-
-{
-\"generic_attributes\": {
-\"overallSentiment\": \"neutral\",
-\"customerService\": \"positive\",
-\"appUsability\": \"negative\",
-\"pricing\": \"negative\",
-\"security\": \"neutral\",
-\"userExperience\": \"neutral\",
-\"reliability\": \"neutral\",
-\"accessibility\": \"neutral\",
-\"credibility\": \"neutral\",
-\"responsiveness\": \"positive\",
-\"harassmentOrDiscrimination\": \"neutral\",
-\"whatDidTheCustomerSuggest\": \"improve personalization\",
-\"whatProductDidTheCustomerMention\": \"5G network, app, loyalty program\"
-"} 
+    /**
+     * Generates a sentiment analysis prompt based on brand details.
+     *
+     * @param array $brandDetails
+     * @return string
+     */
+    public function sentimentAnalysisPrompt($brandDetails)
+    {
+        return "Analyze the sentiment for brand: {$brandDetails['brandName']}, Category: {$brandDetails['category']}\n\n" .
+            "Generic attributes: {$brandDetails['genericAttributes']}\n" .
+            "Category specific attributes: {$brandDetails['categorySpecificAttributes']}\n\n" .
+            "INSTRUCTIONS:\n" .
+            "1. Analyze the review sentiment for each attribute\n" .
+            "2. Respond with COMPLETE JSON only (no extra text)\n" .
+            "3. Include both generic_attributes AND category_specific_attributes\n" .
+            "4. Use values: positive, negative, or neutral\n\n" .
+            "REQUIRED COMPLETE FORMAT:\n" .
+            "{\"generic_attributes\":{\"overallSentiment\":\"...\",\"customerService\":\"...\",\"appUsability\":\"...\",\"pricing\":\"...\",\"security\":\"...\",\"userExperience\":\"...\",\"reliability\":\"...\",\"accessibility\":\"...\",\"credibility\":\"...\",\"responsiveness\":\"...\",\"harassmentOrDiscrimination\":\"...\",\"whatDidTheCustomerSuggest\":\"...\",\"whatProductDidTheCustomerMention\":\"...\"},\"category_specific_attributes\":{\"5G network\":\"...\",\"bill payment options\":\"...\",\"internet/data speed\":\"...\",\"loyaltyPrograms\":\"...\",\"network coverage\":\"...\",\"Personalization\":\"...\"}}\n\n" .
+            "Review text to analyze:";
+    }
+}
