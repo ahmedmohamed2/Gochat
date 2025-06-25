@@ -1,88 +1,93 @@
-    public function generateReportAIReport(Request $request)
-    {
-        $app_id                             = $request->app_id;
-        $prompt_id                          = $request->prompt_id;
-        $prompt                             = Prompt::where("id", $prompt_id)->value("prompt");
-        $start_ai_google_reviews_date       = $request->start_ai_google_reviews_date;
-        $end_ai_google_reviews_date         = $request->end_ai_google_reviews_date;
-    
-        $currentDate                        = Carbon::now();
-        $threeMonthsAgo                     = $currentDate->subMonths(3);
-                    // ->whereRaw('LENGTH(google_reviews.text) >= 50')
+public function generateReportAIReport(Request $request)
+{
+    $app_id                             = $request->app_id;
+    $prompt_id                          = $request->prompt_id;
+    $prompt                             = Prompt::where("id", $prompt_id)->value("prompt");
+    $start_ai_google_reviews_date       = $request->start_ai_google_reviews_date;
+    $end_ai_google_reviews_date         = $request->end_ai_google_reviews_date;
 
-        if (!is_null($start_ai_google_reviews_date) && !is_null($end_ai_google_reviews_date)) {
-            $googleReviews = DB::table('GoogleReview')
-                ->join('GoogleApp', 'GoogleReview.app_id', '=', 'GoogleApp.id')
-                ->where('GoogleApp.id', $app_id)
-                ->whereBetween('GoogleReview.date', [$start_ai_google_reviews_date, $end_ai_google_reviews_date])
-                ->select('GoogleReview.text');
-        } else {
-            $googleReviews = DB::table('GoogleReview')
-                ->select('GoogleReview.text')
-                ->join('GoogleApp', 'GoogleReview.app_id', '=', 'GoogleApp.id')
-                ->where('GoogleApp.id', $app_id)
-                ->whereDate('GoogleReview.date', '>=', $threeMonthsAgo);
-        }
-    
-        $googleReviews = $googleReviews->get();
-    
-        $combinedValuesArray = [];
-        foreach ($googleReviews as $item) {
-            $combinedValuesArray['text'][] = $item->text;
-        }
-    
-        $stringRepresentation = '';
-        foreach ($combinedValuesArray as $key => $values) {
-            foreach ($values as $value) {
-                if ($stringRepresentation !== '') {
-                    $stringRepresentation .= ', ';
-                }
-                $stringRepresentation .= "$key: $value";
+    $currentDate                        = Carbon::now();
+    $threeMonthsAgo                     = $currentDate->subMonths(3);
+                // ->whereRaw('LENGTH(google_reviews.text) >= 50')
+
+    if (!is_null($start_ai_google_reviews_date) && !is_null($end_ai_google_reviews_date)) {
+        $googleReviews = DB::table('GoogleReview')
+            ->join('GoogleApp', 'GoogleReview.app_id', '=', 'GoogleApp.id')
+            ->where('GoogleApp.id', $app_id)
+            ->whereBetween('GoogleReview.date', [$start_ai_google_reviews_date, $end_ai_google_reviews_date])
+            ->select('GoogleReview.text');
+    } else {
+        $googleReviews = DB::table('GoogleReview')
+            ->select('GoogleReview.text')
+            ->join('GoogleApp', 'GoogleReview.app_id', '=', 'GoogleApp.id')
+            ->where('GoogleApp.id', $app_id)
+            ->whereDate('GoogleReview.date', '>=', $threeMonthsAgo);
+    }
+
+    $googleReviews = $googleReviews->get();
+
+    $combinedValuesArray = [];
+    foreach ($googleReviews as $item) {
+        $combinedValuesArray['text'][] = $item->text;
+    }
+
+    $stringRepresentation = '';
+    foreach ($combinedValuesArray as $key => $values) {
+        foreach ($values as $value) {
+            if ($stringRepresentation !== '') {
+                $stringRepresentation .= ', ';
             }
+            $stringRepresentation .= "$key: $value";
         }
-    
-        $text = $stringRepresentation;
-        $user = User::find(Auth::user()->id);
-    
-        // Check token availability
-        $provider = new EncoderProvider();
-        $encoder = $provider->getForModel('gpt-4-turbo');
-        $systemMessage = ['role' => 'system', 'content' => $prompt];
-        $userMessage = ['role' => 'user', 'content' => $text];
-        $systemMessageTokens = count($encoder->encode($systemMessage['content']));
-        $userMessageTokens = count($encoder->encode($userMessage['content']));
-        $inputTokens = $systemMessageTokens + $userMessageTokens;
-    
-        if ($user->user_token < $inputTokens) {
+    }
+
+    $text = $stringRepresentation;
+    $user = User::find(Auth::user()->id);
+
+    // Check token availability
+    $provider = new EncoderProvider();
+    $encoder = $provider->getForModel('gpt-4-turbo');
+    $systemMessageTokens = count($encoder->encode($prompt));
+    $userMessageTokens = count($encoder->encode($text));
+    $inputTokens = $systemMessageTokens + $userMessageTokens;
+
+    if ($user->user_token < $inputTokens) {
+        Log::info('Insufficient tokens for user', ['userId' => $user->id]);
+        return response()->json(['error' => 'insufficient_tokens'], 400);
+    }
+
+    if (empty($text)) {
+        $text = 'No significant reviews available for analysis. please dont show the user the report. tell the user to make sentiment analysis first.';
+    }
+
+    // Instantiate OpenAIConfig class and send request
+    $openAI = new OpenAIConfig();
+    $responseBody = $openAI->sendRequest($prompt, $text);
+
+    // Log the full response for debugging
+    Log::info('API Response for Report', ['response' => $responseBody]);
+
+    if ($responseBody && isset($responseBody['choices'][0]['text'])) {
+        $report = $responseBody['choices'][0]['text'];
+
+        // Log the response text
+        Log::info('Report Response text', ['text' => $report]);
+
+        // Check for output tokens and deduct from user
+        $outputTokens = count($encoder->encode($report));
+        if ($user->user_token < $outputTokens) {
             Log::info('Insufficient tokens for user', ['userId' => $user->id]);
             return response()->json(['error' => 'insufficient_tokens'], 400);
         }
-    
-        if (empty($text)) {
-            $text = 'No significant reviews available for analysis. please dont show the user the report. tell the user to make sentiment analysis first.';
-        }
-    
-        // Instantiate OpenAIConfig class and send request
-        $openAI = new OpenAIConfig();
-        $responseBody = $openAI->sendRequest($prompt, $text);
-    
-        if ($responseBody && isset($responseBody['choices'][0]['message']['content'])) {
-            $report = $responseBody['choices'][0]['message']['content'];
-    
-            // Check for output tokens and deduct from user
-            $outputTokens = count($encoder->encode($report));
-            if ($user->user_token < $outputTokens) {
-                Log::info('Insufficient tokens for user', ['userId' => $user->id]);
-                return response()->json(['error' => 'insufficient_tokens'], 400);
-            }
-    
-            $user->user_token -= ($inputTokens + $outputTokens);
-            $user->save();
-    
-            broadcast(new NewSentimentEvent());
-        } else {
-            $report = 'Error processing request.';
-        }
-    
-        return response()->json(['report' => $report]);
+
+        $user->user_token -= ($inputTokens + $outputTokens);
+        $user->save();
+
+        broadcast(new NewSentimentEvent());
+    } else {
+        Log::warning('API returned no content for report', ['response' => $responseBody]);
+        $report = 'Error processing request.';
     }
+
+    return response()->json(['report' => $report]);
+}
