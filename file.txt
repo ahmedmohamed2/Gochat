@@ -1,18 +1,88 @@
-CEO Report
+    public function generateReportAIReport(Request $request)
+    {
+        $app_id                             = $request->app_id;
+        $prompt_id                          = $request->prompt_id;
+        $prompt                             = Prompt::where("id", $prompt_id)->value("prompt");
+        $start_ai_google_reviews_date       = $request->start_ai_google_reviews_date;
+        $end_ai_google_reviews_date         = $request->end_ai_google_reviews_date;
+    
+        $currentDate                        = Carbon::now();
+        $threeMonthsAgo                     = $currentDate->subMonths(3);
+                    // ->whereRaw('LENGTH(google_reviews.text) >= 50')
 
-Analyze sentiments and themes from customer reviews.
-
-Objective: As a customer insight analyst, analyse customer reviews to provide a strategic insight report for the CEO. Focus on understanding customer sentiments, identifying prevalent issues, and examining mentions of competitors.
-
-Tasks:
-
-Analyze sentiments and themes from customer reviews.
-Highlight frequently mentioned issues and their impact on user experience.
-Detect and report on any mentions of competition, noting how the app compares.
-
-Report Goals:
-
-Create a concise report offering a comprehensive view of customer feedback.
-Provide actionable insights and recommendations for improving the app.
-Delivery: Ensure the report is clear, engaging, and equipped with executive-level summaries to aid quick decision-making.
-NOTE: DO NOT PRINT ANY SYMBOLS OR HASHTAGS OR UNUSUAL CHARACTERS TO SEPERATE PARTS IN THE REPORT. Do it by formatting it like a report with titles and different font sizes.
+        if (!is_null($start_ai_google_reviews_date) && !is_null($end_ai_google_reviews_date)) {
+            $googleReviews = DB::table('GoogleReview')
+                ->join('GoogleApp', 'GoogleReview.app_id', '=', 'GoogleApp.id')
+                ->where('GoogleApp.id', $app_id)
+                ->whereBetween('GoogleReview.date', [$start_ai_google_reviews_date, $end_ai_google_reviews_date])
+                ->select('GoogleReview.text');
+        } else {
+            $googleReviews = DB::table('GoogleReview')
+                ->select('GoogleReview.text')
+                ->join('GoogleApp', 'GoogleReview.app_id', '=', 'GoogleApp.id')
+                ->where('GoogleApp.id', $app_id)
+                ->whereDate('GoogleReview.date', '>=', $threeMonthsAgo);
+        }
+    
+        $googleReviews = $googleReviews->get();
+    
+        $combinedValuesArray = [];
+        foreach ($googleReviews as $item) {
+            $combinedValuesArray['text'][] = $item->text;
+        }
+    
+        $stringRepresentation = '';
+        foreach ($combinedValuesArray as $key => $values) {
+            foreach ($values as $value) {
+                if ($stringRepresentation !== '') {
+                    $stringRepresentation .= ', ';
+                }
+                $stringRepresentation .= "$key: $value";
+            }
+        }
+    
+        $text = $stringRepresentation;
+        $user = User::find(Auth::user()->id);
+    
+        // Check token availability
+        $provider = new EncoderProvider();
+        $encoder = $provider->getForModel('gpt-4-turbo');
+        $systemMessage = ['role' => 'system', 'content' => $prompt];
+        $userMessage = ['role' => 'user', 'content' => $text];
+        $systemMessageTokens = count($encoder->encode($systemMessage['content']));
+        $userMessageTokens = count($encoder->encode($userMessage['content']));
+        $inputTokens = $systemMessageTokens + $userMessageTokens;
+    
+        if ($user->user_token < $inputTokens) {
+            Log::info('Insufficient tokens for user', ['userId' => $user->id]);
+            return response()->json(['error' => 'insufficient_tokens'], 400);
+        }
+    
+        if (empty($text)) {
+            $text = 'No significant reviews available for analysis. please dont show the user the report. tell the user to make sentiment analysis first.';
+        }
+    
+        // Instantiate OpenAIConfig class and send request
+        $openAI = new OpenAIConfig();
+        $responseBody = $openAI->sendRequest($prompt, $text);
+    
+        if ($responseBody && isset($responseBody['choices'][0]['message']['content'])) {
+            $report = $responseBody['choices'][0]['message']['content'];
+    
+            // Check for output tokens and deduct from user
+            $outputTokens = count($encoder->encode($report));
+            if ($user->user_token < $outputTokens) {
+                Log::info('Insufficient tokens for user', ['userId' => $user->id]);
+                return response()->json(['error' => 'insufficient_tokens'], 400);
+            }
+    
+            $user->user_token -= ($inputTokens + $outputTokens);
+            $user->save();
+    
+            broadcast(new NewSentimentEvent());
+        } else {
+            $report = 'Error processing request.';
+        }
+    
+        return response()->json(['report' => $report]);
+    }
