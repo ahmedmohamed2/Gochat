@@ -1,144 +1,88 @@
-public function generateReportAIReport(Request $request)
-{
-    $app_id                             = $request->app_id;
-    $prompt_id                          = $request->prompt_id;
-    $prompt                             = Prompt::where("id", $prompt_id)->value("prompt");
-    $start_ai_google_reviews_date       = $request->start_ai_google_reviews_date;
-    $end_ai_google_reviews_date         = $request->end_ai_google_reviews_date;
-
-    $currentDate                        = Carbon::now();
-    $threeMonthsAgo                     = $currentDate->subMonths(3);
-                // ->whereRaw('LENGTH(google_reviews.text) >= 50')
-
-    if (!is_null($start_ai_google_reviews_date) && !is_null($end_ai_google_reviews_date)) {
-        $googleReviews = DB::table('GoogleReview')
-            ->join('GoogleApp', 'GoogleReview.app_id', '=', 'GoogleApp.id')
-            ->where('GoogleApp.id', $app_id)
-            ->whereBetween('GoogleReview.date', [$start_ai_google_reviews_date, $end_ai_google_reviews_date])
-            ->select('GoogleReview.text');
-    } else {
-        $googleReviews = DB::table('GoogleReview')
-            ->select('GoogleReview.text')
-            ->join('GoogleApp', 'GoogleReview.app_id', '=', 'GoogleApp.id')
-            ->where('GoogleApp.id', $app_id)
-            ->whereDate('GoogleReview.date', '>=', $threeMonthsAgo);
-    }
-
-    $googleReviews = $googleReviews->get();
-
-    // Better formatting for reviews - create a cleaner text structure
-    $reviewTexts = [];
-    foreach ($googleReviews as $index => $item) {
-        $reviewTexts[] = "Review " . ($index + 1) . ": " . trim($item->text);
-    }
-    
-    // Join reviews with clear separators
-    $text = implode("\n\n", $reviewTexts);
-    
-    // If no reviews, set appropriate message
-    if (empty($reviewTexts)) {
-        $text = 'No significant reviews available for analysis. please dont show the user the report. tell the user to make sentiment analysis first.';
-    }
-    $user = User::find(Auth::user()->id);
-
-    // Check token availability
-    $provider = new EncoderProvider();
-    $encoder = $provider->getForModel('gpt-4-turbo');
-    $systemMessageTokens = count($encoder->encode($prompt));
-    $userMessageTokens = count($encoder->encode($text));
-    $inputTokens = $systemMessageTokens + $userMessageTokens;
-
-    if ($user->user_token < $inputTokens) {
-        Log::info('Insufficient tokens for user', ['userId' => $user->id]);
-        return response()->json(['error' => 'insufficient_tokens'], 400);
-    }
-
-    if (empty($reviewTexts)) {
-        $text = 'No significant reviews available for analysis. please dont show the user the report. tell the user to make sentiment analysis first.';
-    }
-
-    // Instantiate OpenAIConfig class and send request (using more tokens for reports)
-    $openAI = new OpenAIConfig();
-    $responseBody = $openAI->sendRequest($prompt, $text, 1500);
-
-    // Log the full response for debugging
-    Log::info('API Response for Report', ['response' => $responseBody]);
-
-    if ($responseBody && isset($responseBody['choices'][0]['text'])) {
-        $report = $responseBody['choices'][0]['text'];
-
-        // Log the response text
-        Log::info('Report Response text', ['text' => $report]);
-
-        // Clean the report - remove echoed review data and keep only the actual report
-        $report = $this->cleanReportContent($report);
-
-        // Check for output tokens and deduct from user
-        $outputTokens = count($encoder->encode($report));
-        if ($user->user_token < $outputTokens) {
-            Log::info('Insufficient tokens for user', ['userId' => $user->id]);
-            return response()->json(['error' => 'insufficient_tokens'], 400);
-        }
-
-        $user->user_token -= ($inputTokens + $outputTokens);
-        $user->save();
-
-        broadcast(new NewSentimentEvent());
-    } else {
-        Log::warning('API returned no content for report', ['response' => $responseBody]);
-        $report = 'Error processing request.';
-    }
-
-    return response()->json(['report' => $report]);
-}
-
-/**
- * Clean the report content by removing echoed review data
- */
-private function cleanReportContent($report)
-{
-    // Remove any echoed review data (lines starting with "Review X:")
-    $lines = explode("\n", $report);
-    $cleanedLines = [];
-    $foundReportStart = false;
-    
-    foreach ($lines as $line) {
-        $trimmedLine = trim($line);
+        public function generateReportAIReport(Request $request)
+        {
+            $app_id                             = $request->app_id;
+            $prompt_id                          = $request->prompt_id;
+            $prompt                             = Prompt::where("id", $prompt_id)->value("prompt");
+            $start_ai_apple_reviews_date       = $request->start_ai_apple_reviews_date;
+            $end_ai_apple_reviews_date         = $request->end_ai_apple_reviews_date;
         
-        // Skip empty lines at the beginning
-        if (empty($trimmedLine) && !$foundReportStart) {
-            continue;
-        }
+            $currentDate                        = Carbon::now();
+            $threeMonthsAgo                     = $currentDate->subMonths(3);
+                            // ->whereRaw('LENGTH(apple_reviews.text) >= 50')
+
+            if (!is_null($start_ai_apple_reviews_date) && !is_null($end_ai_apple_reviews_date)) {
+                $appleReviews = DB::table('AppleReview')
+                    ->join('AppleApp', 'AppleReview.app_id', '=', 'AppleApp.id')
+                    ->where('AppleApp.id', $app_id)
+                    ->whereBetween('AppleReview.updated', [$start_ai_apple_reviews_date, $end_ai_apple_reviews_date])
+                    ->select('AppleReview.text');
+            } else {
+                $appleReviews = DB::table('AppleReview')
+                    ->select('AppleReview.text')
+                    ->join('AppleApp', 'AppleReview.app_id', '=', 'AppleApp.id')
+                    ->where('AppleApp.id', $app_id)
+                    ->whereDate('AppleReview.updated', '>=', $threeMonthsAgo);
+            }
         
-        // Skip lines that look like "Review X: [content]"
-        if (preg_match('/^Review\s+\d+:\s*.+$/', $trimmedLine)) {
-            continue;
-        }
+            $appleReviews = $appleReviews->get();
         
-        // Look for the start of the actual report (headers like #, ##, or words like "Executive", "Summary", etc.)
-        if (preg_match('/^#+\s*.+$/', $trimmedLine) || 
-            stripos($trimmedLine, 'executive') !== false ||
-            stripos($trimmedLine, 'summary') !== false ||
-            stripos($trimmedLine, 'analysis') !== false ||
-            stripos($trimmedLine, 'strategic') !== false ||
-            stripos($trimmedLine, 'insight') !== false ||
-            stripos($trimmedLine, 'report') !== false) {
-            $foundReportStart = true;
-        }
+            $combinedValuesArray = [];
+            foreach ($appleReviews as $item) {
+                $combinedValuesArray['text'][] = $item->text;
+            }
         
-        // Once we find the report start, include all lines
-        if ($foundReportStart) {
-            $cleanedLines[] = $line;
+            $stringRepresentation = '';
+            foreach ($combinedValuesArray as $key => $values) {
+                foreach ($values as $value) {
+                    if ($stringRepresentation !== '') {
+                        $stringRepresentation .= ', ';
+                    }
+                    $stringRepresentation .= "$key: $value";
+                }
+            }
+        
+            $text = $stringRepresentation;
+            $user = User::find(Auth::user()->id);
+        
+            // Check token availability
+            $provider = new EncoderProvider();
+            $encoder = $provider->getForModel('gpt-4-turbo');
+            $systemMessage = ['role' => 'system', 'content' => $prompt];
+            $userMessage = ['role' => 'user', 'content' => $text];
+            $systemMessageTokens = count($encoder->encode($systemMessage['content']));
+            $userMessageTokens = count($encoder->encode($userMessage['content']));
+            $inputTokens = $systemMessageTokens + $userMessageTokens;
+        
+            if ($user->user_token < $inputTokens) {
+                Log::info('Insufficient tokens for user', ['userId' => $user->id]);
+                return response()->json(['error' => 'insufficient_tokens'], 400);
+            }
+        
+            if (empty($text)) {
+                $text = 'No significant reviews available for analysis. please dont show the user the report. tell the user to make sentiment analysis first.';
+            }
+        
+            // Instantiate OpenAIConfig class and send request
+            $openAI = new OpenAIConfig();
+            $responseBody = $openAI->sendRequest($prompt, $text);
+        
+            if ($responseBody && isset($responseBody['choices'][0]['message']['content'])) {
+                $report = $responseBody['choices'][0]['message']['content'];
+        
+                // Check for output tokens and deduct from user
+                $outputTokens = count($encoder->encode($report));
+                if ($user->user_token < $outputTokens) {
+                    Log::info('Insufficient tokens for user', ['userId' => $user->id]);
+                    return response()->json(['error' => 'insufficient_tokens'], 400);
+                }
+        
+                $user->user_token -= ($inputTokens + $outputTokens);
+                $user->save();
+        
+                broadcast(new NewSentimentEvent());
+            } else {
+                $report = 'Error processing request.';
+            }
+        
+            return response()->json(['report' => $report]);
         }
-    }
-    
-    // Join the cleaned lines back together
-    $cleanedReport = implode("\n", $cleanedLines);
-    
-    // If no proper report structure was found, return the original (fallback)
-    if (empty(trim($cleanedReport))) {
-        return $report;
-    }
-    
-    return trim($cleanedReport);
-}
